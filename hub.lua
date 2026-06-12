@@ -36,6 +36,7 @@ local Config = {
     Water = { WaterAll = false },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
+    Gear = { TargetGears = {}, MaxSpendPerCycle = 500000 },
     Mutation = {
         AlertMutations = { "Rainbow", "Starstruck", "Gold", "Frozen", "Electric", "Bloodlit", "Chained" },
         PriceMultipliers = { Gold = 20, Rainbow = 50, Electric = 12, Frozen = 10, Bloodlit = 5, Chained = 8, Starstruck = 100 },
@@ -2891,6 +2892,147 @@ end
 end
 
 ---------------------------------------------------------------
+-- GEAR BUYER MODULE
+---------------------------------------------------------------
+
+Modules.GearBuyer = {}
+do
+    local Gear = Modules.GearBuyer
+    Gear._running = false
+    Gear._thread = nil
+    Gear._stats = { scanned = 0, bought = 0, spent = 0, skipped = 0, errors = 0 }
+
+    -- Cost map from GearShopData
+    local GearCosts = {
+        ["Trowel"]               = 1000,
+        ["Common Watering Can"]  = 2000,
+        ["Speed Mushroom"]       = 1500,
+        ["Jump Mushroom"]        = 1800,
+        ["Common Sprinkler"]     = 3000,
+        ["Sign"]                 = 4000,
+        ["Shrink Mushroom"]      = 4500,
+        ["Supersize Mushroom"]   = 4500,
+        ["Uncommon Sprinkler"]   = 10000,
+        ["Flashbang"]            = 8000,
+        ["Teleporter"]           = 18000,
+        ["Rare Sprinkler"]       = 50000,
+        ["Lantern"]              = 12000,
+        ["Gnome"]                = 50000,
+        ["Legendary Sprinkler"]  = 100000,
+        ["Basic Pot"]            = 60000,
+        ["Super Sprinkler"]      = 300000,
+        ["Super Watering Can"]   = 250000,
+        ["Wheelbarrow"]          = 500000,
+    }
+
+    function Gear._getGearStockFolder()
+        local ok, folder = pcall(function()
+            return game:GetService("ReplicatedStorage")
+                :WaitForChild("StockValues", 5)
+                :WaitForChild("GearShop", 5)
+                :WaitForChild("Items", 5)
+        end)
+        return ok and folder or nil
+    end
+
+    function Gear._getStock(gearName)
+        local folder = Gear._getGearStockFolder()
+        if not folder then return -1 end
+        local val = folder:FindFirstChild(gearName)
+        if not val then return 0 end
+        if val:IsA("ValueBase") then return (val.Value or 0) end
+        return 0
+    end
+
+    function Gear._buyGear(Net, gearName)
+        local ok, result = pcall(function()
+            return Net.invoke("GearShop.PurchaseGear", gearName)
+        end)
+        if ok then
+            if type(result) == "table" then
+                return result[1] ~= false, result[2] or 0
+            end
+            return result ~= false, 0
+        end
+        Gear._stats.errors += 1
+        return false, 0
+    end
+
+    function Gear._pollAndBuy(gearConfig, Net, Utils)
+        Gear._stats.scanned += 1
+
+        local targets = gearConfig.TargetGears or {}
+        if #targets == 0 then return end
+
+        local maxSpend = gearConfig.MaxSpendPerCycle or 500000
+        local spent = 0
+
+        for _, gearName in ipairs(targets) do
+            if not Gear._running then break end
+            if spent >= maxSpend then break end
+
+            local stock = Gear._getStock(gearName)
+            if stock == 0 then
+                Gear._stats.skipped += 1
+                continue
+            end
+
+            local cost = GearCosts[gearName] or 0
+            local sheckles = Utils.getSheckles()
+            if cost > 0 and sheckles < cost then
+                continue -- can't afford
+            end
+
+            local buyCount = 0
+            local maxBuys = (stock > 0 and stock) or 10
+            for i = 1, maxBuys do
+                if not Gear._running then break end
+                if spent >= maxSpend then break end
+
+                local ok, price = Gear._buyGear(Net, gearName)
+                if ok then
+                    buyCount += 1
+                    Gear._stats.bought += 1
+                    spent += (price or cost)
+                    Gear._stats.spent += (price or cost)
+                    task.wait(0.05)
+                else
+                    break
+                end
+            end
+
+            if buyCount > 0 then
+                print("[GAG Hub] Gear bought:", gearName, "x" .. buyCount)
+            end
+        end
+    end
+
+    function Gear.start(config, Net, Utils)
+        if Gear._running then return end
+        Gear._running = true
+
+        local gearConfig = config.Gear or {}
+        local interval = gearConfig.PollInterval or 30
+
+        Gear._thread = task.spawn(function()
+            while Gear._running do
+                Gear._pollAndBuy(gearConfig, Net, Utils)
+                task.wait(interval)
+            end
+        end)
+
+        print("[GAG Hub] Gear Buyer started")
+    end
+
+    function Gear.stop()
+        Gear._running = false
+    end
+
+    function Gear.getStats()
+        return Gear._stats
+    end
+end
+---------------------------------------------------------------
 -- STATUS
 ---------------------------------------------------------------
 
@@ -3097,6 +3239,15 @@ local AllSeeds = {
     "Pinetree","Pumpkin","Thorn Rose","Beanstalk","Lotus",
 }
 
+local AllGears = {
+    -- Sorted by Cost: cheap → expensive
+    "Trowel","Common Watering Can","Speed Mushroom","Jump Mushroom",
+    "Common Sprinkler","Sign","Shrink Mushroom","Supersize Mushroom",
+    "Uncommon Sprinkler","Flashbang","Teleporter","Rare Sprinkler",
+    "Lantern","Gnome","Legendary Sprinkler","Basic Pot",
+    "Super Sprinkler","Super Watering Can","Wheelbarrow",
+}
+
 local function createUI()
     local Rayfield = nil
     local ok = pcall(function()
@@ -3153,6 +3304,12 @@ local function createUI()
     ShopTab:CreateSlider({Name="Poll", Range={0.5,5}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.RestockPollInterval, Flag="RestockPollInterval", Callback=function(v) Config.Timings.RestockPollInterval=v end})
     ShopTab:CreateDropdown({Name="Buy Targets", Options=AllSeeds, CurrentOption=Config.Restock.TargetSeeds, MultipleOptions=true, Flag="RestockTargets", Callback=function(opts) Config.Restock.TargetSeeds=opts end})
     ShopTab:CreateDropdown({Name="Blacklist", Options=AllSeeds, CurrentOption=Config.Restock.BlacklistedSeeds, MultipleOptions=true, Flag="RestockBlacklist", Callback=function(opts) Config.Restock.BlacklistedSeeds=opts end})
+
+    ShopTab:CreateSection("🔧 Auto Buy Gear")
+    ShopTab:CreateToggle({Name="Enabled", CurrentValue=false, Flag="GearBuyer", Callback=function(v) if v then startModule("GearBuyer") else stopModule("GearBuyer") end end})
+    ShopTab:CreateSlider({Name="Poll Interval", Range={10,120}, Increment=5, Suffix="s", CurrentValue=30, Flag="GearPollInterval", Callback=function(v) Config.Gear.PollInterval=v end})
+    ShopTab:CreateDropdown({Name="Buy Gears", Options=AllGears, CurrentOption=Config.Gear.TargetGears, MultipleOptions=true, Flag="GearTargets", Callback=function(opts) Config.Gear.TargetGears=opts end})
+    ShopTab:CreateSlider({Name="Max Spend/Cycle", Range={10000,5000000}, Increment=10000, Suffix=" $", CurrentValue=Config.Gear.MaxSpendPerCycle, Flag="GearMaxSpend", Callback=function(v) Config.Gear.MaxSpendPerCycle=v end})
 
     ShopTab:CreateSection("📦 Inventory")
     ShopTab:CreateToggle({Name="Optimizer", CurrentValue=false, Flag="InventoryOptimizer", Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
