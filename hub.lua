@@ -32,7 +32,7 @@ local Config = {
     },
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
-    Plant = { OnlyEmptyPlots = true },
+    Plant = { OnlyEmptyPlots = true, PreferSeed = nil },
     Water = { WaterAll = false },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
@@ -1156,6 +1156,7 @@ end
 -- Remote: Plant.PlantSeed(position: Vector3, seedName: String, toolInstance: Instance)
 -- Plant areas: CollectionService:GetTagged("PlantArea")
 -- Seed tool: Character tool with "SeedTool" attribute
+-- Flow: find seed in backpack → equip → fire PlantSeed
 ---------------------------------------------------------------
 
 Modules.AutoPlant = {}
@@ -1167,7 +1168,7 @@ do
 Plant._running = false
 Plant._thread  = nil
 Plant._connections = {}
-Plant._stats = { planted = 0, scans = 0, errors = 0, noSeeds = 0 }
+Plant._stats = { planted = 0, scans = 0, errors = 0, noSeeds = 0, equipped = 0 }
 
 ---------------------------------------------------------------
 -- GET EQUIPPED SEED TOOL (matching decompiled GetEquippedTool)
@@ -1183,6 +1184,94 @@ function Plant._getEquippedSeed()
     local seedName = tool:GetAttribute("SeedTool")
     if not seedName then return nil, nil end
     return seedName, tool
+end
+
+---------------------------------------------------------------
+-- FIND SEED TOOLS IN BACKPACK
+-- Returns list of {tool, seedName} sorted by seed name
+---------------------------------------------------------------
+
+function Plant._findSeedsInBackpack(preferSeed)
+    local lp = Players.LocalPlayer
+    local bp = lp and lp:FindFirstChild("Backpack")
+    if not bp then return {} end
+    local seeds = {}
+    for _, tool in ipairs(bp:GetChildren()) do
+        if tool:IsA("Tool") then
+            local sn = tool:GetAttribute("SeedTool")
+            if sn then
+                table.insert(seeds, { tool = tool, seedName = sn })
+            end
+        end
+    end
+    -- Sort: preferred seed first, then alphabetical
+    table.sort(seeds, function(a, b)
+        if preferSeed then
+            local aMatch = (a.seedName == preferSeed) and 1 or 0
+            local bMatch = (b.seedName == preferSeed) and 1 or 0
+            if aMatch ~= bMatch then return aMatch > bMatch end
+        end
+        return a.seedName < b.seedName
+    end)
+    return seeds
+end
+
+---------------------------------------------------------------
+-- EQUIP SEED TOOL FROM BACKPACK
+-- Uses Humanoid:EquipTool() — same as game's internal flow
+-- Returns seedName, toolInstance on success
+---------------------------------------------------------------
+
+function Plant._equipSeed(preferSeed)
+    local lp = Players.LocalPlayer
+    local char = lp and lp.Character
+    if not char then return nil, nil end
+    local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+    if not humanoid then return nil, nil end
+
+    -- Check if already equipped
+    local sn, tool = Plant._getEquippedSeed()
+    if sn then return sn, tool end
+
+    -- Find seed in backpack
+    local seeds = Plant._findSeedsInBackpack(preferSeed)
+    if #seeds == 0 then return nil, nil end
+
+    -- Equip first seed (preferred or first available)
+    local target = seeds[1]
+    local ok = pcall(function()
+        humanoid:EquipTool(target.tool)
+    end)
+    if not ok then return nil, nil end
+
+    -- Wait for tool to appear in character
+    local waited = 0
+    while waited < 2 do
+        task.wait(0.1)
+        waited += 0.1
+        local equipped = char:FindFirstChild(target.tool.Name)
+        if equipped and equipped:IsA("Tool") and equipped:GetAttribute("SeedTool") then
+            Plant._stats.equipped += 1
+            return target.seedName, target.tool
+        end
+    end
+
+    return nil, nil
+end
+
+---------------------------------------------------------------
+-- UNEQUIP CURRENT TOOL (back to backpack)
+---------------------------------------------------------------
+
+function Plant._unequipTool()
+    local lp = Players.LocalPlayer
+    local char = lp and lp.Character
+    if not char then return end
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if not tool then return end
+    pcall(function()
+        tool.Parent = lp:FindFirstChild("Backpack")
+    end)
 end
 
 ---------------------------------------------------------------
@@ -1261,40 +1350,69 @@ end
 
 ---------------------------------------------------------------
 -- AUTO PLANT LOGIC
+-- Flow: equip seed from backpack → fill all empty spots → unequip
 ---------------------------------------------------------------
 
 function Plant._autoPlant(plantConfig, Net, Utils)
     Plant._stats.scans += 1
 
-    -- Get equipped seed tool
-    local seedName, toolInstance = Plant._getEquippedSeed()
+    local preferSeed = plantConfig.PreferSeed -- optional: preferred seed name
+
+    -- Step 1: USE SEED — equip from backpack before planting
+    local seedName, toolInstance = Plant._equipSeed(preferSeed)
     if not seedName then
         Plant._stats.noSeeds += 1
         return
     end
 
-    -- Get plot
+    -- Step 2: Get plot
     local myPlot = Plant._getMyPlot()
-    if not myPlot then return end
+    if not myPlot then
+        Plant._unequipTool()
+        return
+    end
 
-    -- Find empty spots via PlantArea tags
+    -- Step 3: Find empty spots via PlantArea tags
     local spots = Plant._findEmptySpots(myPlot)
-    if #spots == 0 then return end
+    if #spots == 0 then
+        Plant._unequipTool()
+        return
+    end
 
-    -- Plant in first empty spot
-    local spot = spots[1]
-    local pos = spot.Position
+    -- Step 4: Plant in ALL empty spots (fill the plot)
+    local planted = 0
+    for _, spot in ipairs(spots) do
+        if not Plant._running then break end
+        local pos = spot.Position
 
-    -- Fire PlantSeed(position, seedName, toolInstance) — correct arg order
-    local ok = pcall(function()
-        Net.fire("Plant.PlantSeed", pos, seedName, toolInstance)
-    end)
+        -- Verify still equipped before each fire
+        local curSn, curTool = Plant._getEquippedSeed()
+        if not curSn then
+            -- Re-equip if tool got consumed
+            seedName, toolInstance = Plant._equipSeed(preferSeed)
+            if not seedName then break end
+        end
 
-    if ok then
-        Plant._stats.planted += 1
-        print("[GAG Hub] Planted:", seedName, "at", tostring(pos))
-    else
-        Plant._stats.errors += 1
+        local ok = pcall(function()
+            Net.fire("Plant.PlantSeed", pos, seedName, toolInstance)
+        end)
+
+        if ok then
+            planted += 1
+            Plant._stats.planted += 1
+            print("[GAG Hub] Planted:", seedName, "at", tostring(pos))
+        else
+            Plant._stats.errors += 1
+        end
+
+        task.wait(0.3) -- small delay between plants
+    end
+
+    -- Step 5: Unequip after planting
+    Plant._unequipTool()
+
+    if planted > 0 then
+        print("[GAG Hub] Auto-Plant cycle: planted", planted, seedName)
     end
 end
 
