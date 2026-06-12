@@ -799,9 +799,9 @@ do
 
     ---------------------------------------------------------------
     -- COLLECT ALL FRUITS ON MY PLOT (direct remote, no prompt)
-    -- Walk: Plot → Plants → PlantModel(PlantId attr) → Fruits → FruitModel(FruitId attr)
-    -- Fire: Garden.CollectFruit(plantId, fruitId)
-    -- NOTE: fruit model name ≠ FruitId (name = "{userId}_{plantId}_{fruitId}")
+    -- Two harvest paths:
+    --   Multi: Plant → Fruits → FruitModel(HarvestPart.HarvestPrompt) → CollectFruit(plantId, fruitId)
+    --   Single: Plant → HarvestPart.HarvestPrompt (no Fruits folder) → CollectFruit(plantId, "")
     ---------------------------------------------------------------
 
     function Harvest._collectAll(Net)
@@ -816,6 +816,8 @@ do
             if not Harvest._running then break end
             local plantId = plantModel:GetAttribute("PlantId")
             if not plantId then continue end
+
+            -- Path A: Multi-harvest (has Fruits folder)
             local fruitsFolder = plantModel:FindFirstChild("Fruits")
             if fruitsFolder then
                 for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
@@ -825,11 +827,18 @@ do
                     pcall(function()
                         Net.fire("Garden.CollectFruit", plantId, fruitId or "")
                     end)
-                    if fruitId then
-                        count += 1
-                        print("[GAG Hub] Harvested:", fruitId, "plant:", plantId)
-                    end
+                    count += 1
+                    print("[GAG Hub] Harvested:", fruitId or "?", "plant:", plantId)
                 end
+            end
+
+            -- Path B: Single-harvest (HarvestPrompt directly on plant)
+            if Harvest._isHarvestable(plantModel) then
+                pcall(function()
+                    Net.fire("Garden.CollectFruit", plantId, "")
+                end)
+                count += 1
+                print("[GAG Hub] Harvested (single):", plantId)
             end
         end
         return count
