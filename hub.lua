@@ -3213,25 +3213,24 @@ end)
 ---------------------------------------------------------------
 
 local AllSeeds = {
-    -- Sorted by PurchasePrice: cheap → expensive
-    "Carrot","Baby Cactus","Glow Mushroom","Romanesco","Horned Melon",
-    "Strawberry","Blueberry","Tulip","Tomato","Apple","Bamboo",
-    "Corn","Cactus","Pineapple","Mushroom","Green Bean",
-    "Banana","Grape","Coconut","Mango","Dragon Fruit",
-    "Acorn","Cherry","Sunflower","Venus Fly Trap","Poison Apple",
-    "Pomegranate","Ghost Pepper","Poison Ivy",
-    "Moon Bloom","Dragon's Breath",
-    -- Special/event seeds (no shop price)
-    "Pinetree","Pumpkin","Thorn Rose","Beanstalk","Lotus",
+    -- Sorted by SellValue: low → high
+    "Strawberry","Carrot","Blueberry","Tomato","Green Bean",
+    "Apple","Pineapple","Corn","Banana","Cactus","Grape",
+    "Coconut","Tulip","Baby Cactus","Mango","Pinetree",
+    "Thorn Rose","Dragon Fruit","Acorn","Horned Melon",
+    "Pumpkin","Cherry","Glow Mushroom","Bamboo",
+    "Pomegranate","Poison Apple","Romanesco","Poison Ivy",
+    "Sunflower","Beanstalk","Ghost Pepper","Venus Fly Trap",
+    "Dragon's Breath","Lotus","Moon Bloom","Mushroom",
 }
 
 local AllGears = {
-    -- Sorted by Cost: cheap → expensive
-    "Trowel","Common Watering Can","Speed Mushroom","Jump Mushroom",
+    -- Sorted by Cost: low → high
+    "Trowel","Speed Mushroom","Jump Mushroom","Common Watering Can",
     "Common Sprinkler","Sign","Shrink Mushroom","Supersize Mushroom",
-    "Uncommon Sprinkler","Flashbang","Teleporter","Rare Sprinkler",
-    "Lantern","Gnome","Legendary Sprinkler","Basic Pot",
-    "Super Sprinkler","Super Watering Can","Wheelbarrow",
+    "Flashbang","Uncommon Sprinkler","Lantern","Teleporter",
+    "Rare Sprinkler","Gnome","Basic Pot","Legendary Sprinkler",
+    "Super Watering Can","Super Sprinkler","Wheelbarrow",
 }
 
 local function createUI()
