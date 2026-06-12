@@ -3070,10 +3070,27 @@ local function getFullStatus()
     local lines = {"GAG HUB STATUS", "Sheckles: " .. Utils.formatNumber(Utils.getSheckles()), ""}
     for name, mod in pairs(Modules) do
         local st = Running[name] and "ON" or "OFF"
-        local stats = mod.getStats and mod.getStats() or {}
-        local parts = {}
-        for k, v in pairs(stats) do parts[#parts+1] = k .. "=" .. tostring(v) end
-        lines[#lines+1] = "  " .. st .. " " .. name .. ": " .. table.concat(parts, " | ")
+        local info = ""
+        if name == "RestockSniper" then
+            local t = Config.Restock.TargetSeeds or {}
+            info = #t > 0 and table.concat(t, ", ") or "(none)"
+        elseif name == "GearBuyer" then
+            local t = Config.Gear.TargetGears or {}
+            info = #t > 0 and table.concat(t, ", ") or "(none)"
+        elseif name == "AutoPlant" then
+            info = Config.Plant.PreferSeed or "(auto)"
+        elseif name == "AutoBuyPet" then
+            info = "min: " .. (Config.Pet.MinRarity or "Rare")
+        elseif name == "MutationTracker" then
+            info = "min: " .. (Config.Mutation.MinRarity or "Common")
+        elseif name == "AutoSell" then
+            info = Config.Sell.AutoSell and "auto" or "manual"
+        elseif name == "AutoWater" then
+            info = Config.Water.WaterAll and "all" or "dry only"
+        elseif name == "StealBot" then
+            info = Config.Steal.Enabled and "night mode" or "off"
+        end
+        lines[#lines+1] = "  " .. st .. " " .. name .. ": " .. info
     end
     return table.concat(lines, "\n")
 end
@@ -3221,16 +3238,31 @@ function Stats.buildText()
     table.insert(lines, string.format("  Items: %d  (Seeds: %d, Fruits: %d)", totalItems, seedCount, fruitCount))
     table.insert(lines, "")
 
-    -- Module stats
+    -- Module configs
     table.insert(lines, string.format("⚡ **Modules** (%d active)", activeCount))
     for name, mod in pairs(Modules) do
         local st = Running[name] and "✅" or "⬜"
-        local stats = mod.getStats and mod.getStats() or {}
-        local parts = {}
-        for k, v in pairs(stats) do
-            parts[#parts+1] = k .. "=" .. tostring(v)
+        local info = ""
+        if name == "RestockSniper" then
+            local t = Config.Restock.TargetSeeds or {}
+            info = #t > 0 and table.concat(t, ", ") or "(none)"
+        elseif name == "GearBuyer" then
+            local t = Config.Gear.TargetGears or {}
+            info = #t > 0 and table.concat(t, ", ") or "(none)"
+        elseif name == "AutoPlant" then
+            info = Config.Plant.PreferSeed or "(auto)"
+        elseif name == "AutoBuyPet" then
+            info = "min: " .. (Config.Pet.MinRarity or "Rare")
+        elseif name == "MutationTracker" then
+            info = "min: " .. (Config.Mutation.MinRarity or "Common")
+        elseif name == "AutoSell" then
+            info = Config.Sell.AutoSell and "auto" or "manual"
+        elseif name == "AutoWater" then
+            info = Config.Water.WaterAll and "all" or "dry only"
+        elseif name == "StealBot" then
+            info = Config.Steal.Enabled and "night mode" or "off"
         end
-        table.insert(lines, string.format("  %s %s: %s", st, name, table.concat(parts, " | ")))
+        table.insert(lines, string.format("  %s %s: %s", st, name, info))
     end
 
     return table.concat(lines, "\n")
