@@ -27,7 +27,6 @@ local Config = {
     },
     Restock = {
         TargetSeeds = {},
-        MaxSpendPerCycle = 500000,
         BlacklistedSeeds = {},
     },
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
@@ -36,7 +35,7 @@ local Config = {
     Water = { WaterAll = false },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
-    Gear = { TargetGears = {}, MaxSpendPerCycle = 500000 },
+    Gear = { TargetGears = {} },
     Mutation = {
         AlertMutations = { "Rainbow", "Starstruck", "Gold", "Frozen", "Electric", "Bloodlit", "Chained" },
         PriceMultipliers = { Gold = 20, Rainbow = 50, Electric = 12, Frozen = 10, Bloodlit = 5, Chained = 8, Starstruck = 100 },
@@ -1599,13 +1598,9 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
         blacklist[name] = true
     end
 
-    local maxSpend = restockConfig.MaxSpendPerCycle or 500000
-    local spent = 0
-
     for _, seedName in ipairs(targets) do
         if not Restock._running then break end
         if blacklist[seedName] then continue end
-        if spent >= maxSpend then break end
 
         local stock = Restock._getStock(seedName)
         if stock == 0 then
@@ -1613,18 +1608,16 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
             continue -- out of stock
         end
 
-        -- DRAIN: buy in loop until stock empty or budget exhausted
+        -- DRAIN: buy in loop until stock empty
         local buyCount = 0
         local maxBuys = (stock > 0 and stock) or 50 -- stock=-1 unknown, try 50
         for i = 1, maxBuys do
             if not Restock._running then break end
-            if spent >= maxSpend then break end
 
             local ok, price = Restock._buySeed(Net, seedName)
             if ok then
                 buyCount += 1
                 Restock._stats.bought += 1
-                spent += (price or 0)
                 task.wait(0.05) -- minimal delay between buys
             else
                 break -- buy failed, probably out of stock
@@ -2900,7 +2893,7 @@ do
     local Gear = Modules.GearBuyer
     Gear._running = false
     Gear._thread = nil
-    Gear._stats = { scanned = 0, bought = 0, spent = 0, skipped = 0, errors = 0 }
+    Gear._stats = { scanned = 0, bought = 0, skipped = 0, errors = 0 }
 
     -- Cost map from GearShopData
     local GearCosts = {
@@ -2964,12 +2957,8 @@ do
         local targets = gearConfig.TargetGears or {}
         if #targets == 0 then return end
 
-        local maxSpend = gearConfig.MaxSpendPerCycle or 500000
-        local spent = 0
-
         for _, gearName in ipairs(targets) do
             if not Gear._running then break end
-            if spent >= maxSpend then break end
 
             local stock = Gear._getStock(gearName)
             if stock == 0 then
@@ -2987,14 +2976,11 @@ do
             local maxBuys = (stock > 0 and stock) or 10
             for i = 1, maxBuys do
                 if not Gear._running then break end
-                if spent >= maxSpend then break end
 
                 local ok, price = Gear._buyGear(Net, gearName)
                 if ok then
                     buyCount += 1
                     Gear._stats.bought += 1
-                    spent += (price or cost)
-                    Gear._stats.spent += (price or cost)
                     task.wait(0.05)
                 else
                     break
@@ -3309,7 +3295,6 @@ local function createUI()
     ShopTab:CreateToggle({Name="Enabled", CurrentValue=false, Flag="GearBuyer", Callback=function(v) if v then startModule("GearBuyer") else stopModule("GearBuyer") end end})
     ShopTab:CreateSlider({Name="Poll Interval", Range={10,120}, Increment=5, Suffix="s", CurrentValue=30, Flag="GearPollInterval", Callback=function(v) Config.Gear.PollInterval=v end})
     ShopTab:CreateDropdown({Name="Buy Gears", Options=AllGears, CurrentOption=Config.Gear.TargetGears, MultipleOptions=true, Flag="GearTargets", Callback=function(opts) Config.Gear.TargetGears=opts end})
-    ShopTab:CreateSlider({Name="Max Spend/Cycle", Range={10000,5000000}, Increment=10000, Suffix=" $", CurrentValue=Config.Gear.MaxSpendPerCycle, Flag="GearMaxSpend", Callback=function(v) Config.Gear.MaxSpendPerCycle=v end})
 
     ShopTab:CreateSection("📦 Inventory")
     ShopTab:CreateToggle({Name="Optimizer", CurrentValue=false, Flag="InventoryOptimizer", Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
