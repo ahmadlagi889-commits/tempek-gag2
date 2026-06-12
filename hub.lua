@@ -1949,7 +1949,7 @@ do
     Steal._running = false
     Steal._thread  = nil
     Steal._connections = {}
-    Steal._stats = { attempts = 0, stolen = 0, returned = 0, errors = 0, nightCycles = 0 }
+    Steal._stats = { attempts = 0, stolen = 0, returned = 0, errors = 0, nightCycles = 0, skipped = 0 }
 
     ---------------------------------------------------------------
     -- GET MY PLOT ID
@@ -1962,15 +1962,19 @@ do
 
     ---------------------------------------------------------------
     -- FIND STEALABLE PROMPTS ON OTHER PLAYERS' GARDENS
-    -- Path: Plot.Plants[PlantId].Fruits[FruitId].*.StealPrompt
-    -- Attrs on fruit Model: UserId, PlantId, FruitId
-    -- HoldDuration > 0 = Bamboo (can't steal, skip)
+    -- Matching decompiled u87 guard logic:
+    --   gate: Night.Value == true
+    --   prompt.Enabled == true
+    --   prompt:GetAttribute("Collected") != true
+    --   StealPrompt + HoldDuration > 0 → SKIP (Bamboo)
+    --   get PlantId/FruitId from parent fruit Model
     ---------------------------------------------------------------
 
     function Steal._findStealablePrompts(myPlotId)
         local results = {}
         local gardens = workspace:FindFirstChild("Gardens")
         if not gardens then return results end
+
         for _, garden in ipairs(gardens:GetChildren()) do
             local plotNum = tonumber(garden.Name:match("Plot(%d+)"))
             if plotNum and plotNum ~= myPlotId then
@@ -1980,24 +1984,30 @@ do
                         local fruitsFolder = plantModel:FindFirstChild("Fruits")
                         if fruitsFolder then
                             for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
-                                for _, child in ipairs(fruitModel:GetDescendants()) do
-                                    if child:IsA("ProximityPrompt") and child:HasTag("StealPrompt") then
-                                        if child.HoldDuration > 0 then
-                                            continue -- Bamboo, can't steal
-                                        end
-                                        local userId = tonumber(fruitModel:GetAttribute("UserId"))
-                                        local plantId = fruitModel:GetAttribute("PlantId")
-                                        local fruitId = fruitModel:GetAttribute("FruitId")
-                                        if userId and plantId then
-                                            table.insert(results, {
-                                                prompt = child,
-                                                userId = userId,
-                                                plantId = plantId,
-                                                fruitId = fruitId or "",
-                                                gardenName = garden.Name,
-                                            })
-                                        end
-                                    end
+                                local prompt = fruitModel:FindFirstChild("StealPrompt", true)
+                                if not prompt then continue end
+                                if not prompt:IsA("ProximityPrompt") then continue end
+
+                                -- Guard: must be enabled, not already collected
+                                if not prompt.Enabled then continue end
+                                if prompt:GetAttribute("Collected") then continue end
+
+                                -- Guard: Bamboo has HoldDuration > 0, can't steal
+                                if prompt.HoldDuration > 0 then continue end
+
+                                -- Read attrs from fruit MODEL (not prompt)
+                                local userId = tonumber(fruitModel:GetAttribute("UserId"))
+                                local plantId = fruitModel:GetAttribute("PlantId")
+                                local fruitId = fruitModel:GetAttribute("FruitId")
+
+                                if userId and plantId then
+                                    table.insert(results, {
+                                        prompt   = prompt,
+                                        userId   = userId,
+                                        plantId  = plantId,
+                                        fruitId  = fruitId or "",
+                                        gardenName = garden.Name,
+                                    })
                                 end
                             end
                         end
@@ -2019,12 +2029,23 @@ do
         local interval = config.Timings.StealInterval or 1.5
         local stealConfig = config.Steal or {}
 
+        -- Listen for server steal confirmation events
+        local startedConn = Net.on("Steal.StealStarted", function(fruitInstance)
+            print("[GAG Hub] StealStarted confirmed by server:", fruitInstance and fruitInstance.Name or "?")
+        end)
+        local cancelledConn = Net.on("Steal.StealCancelled", function(fruitInstance)
+            print("[GAG Hub] StealCancelled by server:", fruitInstance and fruitInstance.Name or "?")
+        end)
+        if startedConn then table.insert(Steal._connections, startedConn) end
+        if cancelledConn then table.insert(Steal._connections, cancelledConn) end
+
         Steal._thread = task.spawn(function()
             local wasNight = false
             while Steal._running do
                 local isNight = Utils.isNight()
                 if isNight and not wasNight then
                     Steal._stats.nightCycles += 1
+                    Steal._stats.attempts = 0 -- reset per night
                     print("[GAG Hub] 🌙 Night cycle started - Steal Bot active")
                 end
                 if isNight then
@@ -2047,11 +2068,15 @@ do
 
     function Steal._stealLoop(stealConfig, Net, Utils)
         local LP = Players.LocalPlayer
+
+        -- If already carrying → return to plot first
         local carrying = LP:GetAttribute("CarryingStolenFruit")
         if carrying then
             Steal._returnFruit(Net, Utils)
             return
         end
+
+        -- Max attempts guard
         local maxAttempts = stealConfig.MaxAttemptsPerNight or 20
         if Steal._stats.attempts >= maxAttempts then return end
 
@@ -2061,36 +2086,99 @@ do
         local entries = Steal._findStealablePrompts(myPlotId)
         for _, entry in ipairs(entries) do
             if not Steal._running then break end
-            if stealConfig.MinFruitValue then
+            if Steal._stats.attempts >= maxAttempts then break end
+
+            -- Value filter
+            if stealConfig.MinFruitValue and stealConfig.MinFruitValue > 0 then
                 local sellValue = Steal._estimateValue(entry.plantId)
                 if sellValue < stealConfig.MinFruitValue then
+                    Steal._stats.skipped += 1
                     continue
                 end
             end
-            Steal._attemptSteal(entry, Net, Utils)
-            task.wait(0.5)
-            local nowCarrying = LP:GetAttribute("CarryingStolenFruit")
-            if nowCarrying then
+
+            -- Attempt steal with full guard sequence
+            local success = Steal._attemptSteal(entry, Net, Utils)
+            if success then
                 Steal._stats.stolen += 1
                 print("[GAG Hub] Stolen from", entry.gardenName, "plant:", entry.plantId)
                 Steal._returnFruit(Net, Utils)
                 return
             end
+
+            task.wait(0.5)
         end
     end
 
     ---------------------------------------------------------------
-    -- ATTEMPT STEAL (direct remotes, matching decompiled flow)
-    -- BeginSteal(userId, plantId, fruitId) → CompleteSteal()
+    -- ATTEMPT STEAL (matching decompiled flow)
+    -- 1. Set Collected attr (anti-spam)
+    -- 2. Simulate hold: InputHoldBegin → delay → InputHoldEnd
+    -- 3. Fire BeginSteal(userId, plantId, fruitId)
+    -- 4. Wait for CarryingStolenFruit
+    -- 5. Fire CompleteSteal()
+    -- 6. Clear Collected attr
     ---------------------------------------------------------------
 
     function Steal._attemptSteal(entry, Net, Utils)
+        local prompt = entry.prompt
+        if not prompt or not prompt.Parent then
+            return false
+        end
+        if not prompt.Enabled then
+            return false
+        end
+        if prompt:GetAttribute("Collected") then
+            return false
+        end
+
         Steal._stats.attempts += 1
+
+        -- Step 1: Anti-spam lock
+        pcall(function() prompt:SetAttribute("Collected", true) end)
+
+        -- Step 2: Simulate hold (matching u10 function)
+        local holdDuration = math.max(0.09, prompt.HoldDuration + 0.1)
         pcall(function()
-            Net.fire("Steal.BeginSteal", entry.userId, entry.plantId, entry.fruitId)
-            task.wait(0.2)
-            Net.fire("Steal.CompleteSteal")
+            prompt:InputHoldBegin()
         end)
+        task.wait(holdDuration)
+        pcall(function()
+            if prompt and prompt:IsDescendantOf(workspace) then
+                prompt:InputHoldEnd()
+            end
+        end)
+
+        -- Step 3: Fire steal remotes
+        local fired = pcall(function()
+            Net.fire("Steal.BeginSteal", entry.userId, entry.plantId, entry.fruitId)
+        end)
+        if not fired then
+            pcall(function() prompt:SetAttribute("Collected", nil) end)
+            Steal._stats.errors += 1
+            return false
+        end
+
+        -- Step 4: Wait for server to confirm + carrying check
+        task.wait(0.5)
+        local LP = Players.LocalPlayer
+        local nowCarrying = LP:GetAttribute("CarryingStolenFruit")
+
+        -- Step 5: Complete steal if carrying
+        if nowCarrying then
+            pcall(function() Net.fire("Steal.CompleteSteal") end)
+        end
+
+        -- Step 6: Clear Collected lock after safe delay
+        task.delay(holdDuration + 0.5, function()
+            pcall(function()
+                if prompt and prompt:IsDescendantOf(workspace) then
+                    prompt:SetAttribute("Collected", nil)
+                end
+            end)
+        end)
+
+        return nowCarrying and true or false
     end
 
     ---------------------------------------------------------------
