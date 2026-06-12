@@ -21,8 +21,8 @@ local Config = {
     },
     Timings = {
         HarvestInterval = 2, SellInterval = 5, WaterInterval = 3,
-        PlantInterval = 5, RestockPollInterval = 1, WeatherPollInterval = 5,
-        StealInterval = 1.5, InventoryCheckInterval = 10,
+        PlantInterval = 5, RestockPollInterval = 1, MutationScanInterval = 3,
+        WeatherPollInterval = 5, StealInterval = 1.5, InventoryCheckInterval = 10,
     },
     Restock = {
         TargetSeeds = {},
