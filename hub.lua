@@ -778,6 +778,25 @@ do
         return gardens:FindFirstChild("Plot" .. tostring(plotId))
     end
 
+    function Harvest._isAlive()
+        local lp = Players.LocalPlayer
+        if not lp then return false end
+        local char = lp.Character
+        if not char then return false end
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        return hum and hum.Health > 0
+    end
+
+    function Harvest._isHarvestable(fruitModel)
+        if not fruitModel or not fruitModel.Parent then return false end
+        local harvestPart = fruitModel:FindFirstChild("HarvestPart")
+        if not harvestPart then return false end
+        local prompt = harvestPart:FindFirstChild("HarvestPrompt")
+        if not prompt then return false end
+        if not prompt.Enabled then return false end
+        return true
+    end
+
     ---------------------------------------------------------------
     -- COLLECT ALL FRUITS ON MY PLOT (direct remote, no prompt)
     -- Walk: Plot → Plants → PlantModel(PlantId attr) → Fruits → FruitModel(FruitId attr)
@@ -786,6 +805,8 @@ do
     ---------------------------------------------------------------
 
     function Harvest._collectAll(Net)
+        if not Harvest._isAlive() then return 0 end
+
         local plot = Harvest._getMyPlot()
         if not plot then return 0 end
         local count = 0
@@ -799,6 +820,7 @@ do
             if fruitsFolder then
                 for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
                     if not Harvest._running then break end
+                    if not Harvest._isHarvestable(fruitModel) then continue end
                     local fruitId = fruitModel:GetAttribute("FruitId")
                     pcall(function()
                         Net.fire("Garden.CollectFruit", plantId, fruitId or "")
@@ -825,6 +847,8 @@ do
 
         -- [METHOD 1] Listen for new fruits and collect immediately
         local fruitAddedConn = Net.on("Garden.FruitAdded", function(plantId, fruitId, fruitName, data)
+            if not Harvest._running then return end
+            if not Harvest._isAlive() then return end
             task.wait(0.15)
             pcall(function()
                 Net.fire("Garden.CollectFruit", plantId, fruitId or "")
@@ -1327,8 +1351,42 @@ do
 Restock._running = false
 Restock._thread  = nil
 Restock._connections = {}
-Restock._stats = { bought = 0, scanned = 0, moneySpent = 0, errors = 0 }
-Restock._lastRestockTime = 0
+Restock._stats = { bought = 0, scanned = 0, moneySpent = 0, errors = 0, skipped = 0 }
+
+---------------------------------------------------------------
+-- GET STOCK VALUES
+---------------------------------------------------------------
+
+function Restock._getStockFolder()
+    local ok, folder = pcall(function()
+        return game:GetService("ReplicatedStorage")
+            :WaitForChild("StockValues", 5)
+            :WaitForChild("SeedShop", 5)
+            :WaitForChild("Items", 5)
+    end)
+    return ok and folder or nil
+end
+
+function Restock._getStock(seedName)
+    local folder = Restock._getStockFolder()
+    if not folder then return -1 end -- unknown
+    local val = folder:FindFirstChild(seedName)
+    if not val then return 0 end
+    if val:IsA("ValueBase") then return (val.Value or 0) end
+    -- might be a NumberValue / IntValue directly
+    return 0
+end
+
+function Restock._getRestockTime()
+    local ok, val = pcall(function()
+        local unix = game:GetService("ReplicatedStorage")
+            :WaitForChild("StockValues", 5)
+            :WaitForChild("SeedShop", 5)
+            :WaitForChild("UnixNextRestock", 5)
+        return unix.Value or 0
+    end)
+    return ok and val or 0
+end
 
 ---------------------------------------------------------------
 -- START
@@ -1353,198 +1411,53 @@ function Restock.start(config, Net, Utils)
 end
 
 ---------------------------------------------------------------
--- POLL RESTOCK AND BUY
+-- POLL AND BUY
 ---------------------------------------------------------------
 
 function Restock._pollAndBuy(restockConfig, Net, Utils)
     Restock._stats.scanned += 1
 
-    -- Check if shop has restocked by monitoring stock changes
-    local sheckles = Utils.getSheckles()
-    local maxSpend = restockConfig.MaxSpendPerCycle or 500000
-    local spent = 0
-
-    -- Get target seeds
     local targets = restockConfig.TargetSeeds or {}
+    if #targets == 0 then return end
+
     local blacklist = {}
     for _, name in ipairs(restockConfig.BlacklistedSeeds or {}) do
         blacklist[name] = true
     end
 
-    -- Try to buy each target seed
     for _, seedName in ipairs(targets) do
+        if not Restock._running then break end
         if blacklist[seedName] then continue end
-        if spent >= maxSpend then break end
 
-        -- Check if this seed is in stock
-        -- The game uses inventory-based shop system
-        -- We attempt to buy and handle failure gracefully
-        local canBuy = Restock._checkStock(seedName)
-        if canBuy then
-            -- Attempt purchase via the shop system
-            local buyOk = Restock._attemptBuy(Net, seedName)
-            if buyOk then
-                Restock._stats.bought += 1
-                spent += Restock._estimatePrice(seedName)
-                Config.Notify("Restock Sniper",
-                    "Bought " .. seedName .. "!", 3)
-                task.wait(0.5) -- delay between purchases
-            end
+        local stock = Restock._getStock(seedName)
+        if stock == 0 then
+            Restock._stats.skipped += 1
+            continue -- out of stock
         end
-    end
 
-    if spent > 0 then
-        Restock._stats.moneySpent += spent
+        -- stock > 0 or stock == -1 (unknown, try anyway)
+        local ok = Restock._buySeed(Net, seedName)
+        if ok then
+            Restock._stats.bought += 1
+            print("[GAG Hub] Bought: " .. seedName .. " (stock left: " .. stock .. ")")
+            task.wait(0.3)
+        end
     end
 end
 
 ---------------------------------------------------------------
--- CHECK STOCK (reads from value objects or game state)
+-- BUY SEED (actual remote)
 ---------------------------------------------------------------
 
-function Restock._checkStock(seedName)
-    -- Method 1: Check ReplicatedStorage stock values
-    local RS = game:GetService("ReplicatedStorage")
-    local stockFolder = RS:FindFirstChild("StockValues")
-        and RS.StockValues:FindFirstChild("SeedShop")
-        and RS.StockValues.SeedShop:FindFirstChild("Items")
-
-    if stockFolder then
-        local stockVal = stockFolder:FindFirstChild(seedName)
-        if stockVal and stockVal:IsA("ValueBase") then
-            return (stockVal.Value or 0) > 0
-        end
-    end
-
-    -- Method 2: Assume available (let buy attempt fail if not)
-    return true
-end
-
----------------------------------------------------------------
--- ATTEMPT BUY
----------------------------------------------------------------
-
-function Restock._attemptBuy(Net, seedName)
-    -- Try various buy remotes the game might use
-    -- The shop system may use DevProducts or direct purchase
-
-    -- Method 1: Direct seed purchase (if exists)
-    if Net.exists("SeedShop.BuySeed") then
-        return Net.fire("SeedShop.BuySeed", seedName)
-    end
-
-    -- Method 2: Generic shop purchase
-    if Net.exists("Shop.BuyItem") then
-        return Net.fire("Shop.BuyItem", seedName)
-    end
-
-    -- Method 3: Token purchase
-    if Net.exists("DevProducts.PurchaseWithTokens") then
-        return Net.fire("DevProducts.PurchaseWithTokens", seedName)
-    end
-
-    -- Method 4: Use ProximityPrompt on seed shop NPC
-    local success = false
-    pcall(function()
-        local CollectionService = game:GetService("CollectionService")
-        for _, obj in ipairs(CollectionService:GetTagged("SeedShop")) do
-            if obj:IsA("ProximityPrompt") and obj.Enabled then
-                -- Trigger to open shop, then buy from UI
-                fireproximityprompt(obj)
-                success = true
-                break
-            end
-        end
+function Restock._buySeed(Net, seedName)
+    local ok, result = pcall(function()
+        return Net.fire("SeedShop.PurchaseSeed", seedName)
     end)
-
-    if not success then
-        -- Method 5: Click seed shop button in GUI
-        pcall(function()
-            local LP = game:GetService("Players").LocalPlayer
-            local gui = LP.PlayerGui:FindFirstChild("SeedShop")
-                or LP.PlayerGui:FindFirstChild("Shop")
-            if gui then
-                -- Look for buy button for this seed
-                local btn = Restock._findBuyButton(gui, seedName)
-                if btn then
-                    -- Simulate click
-                    if btn.Activated then
-                        -- This is client-side, need to fire the actual remote
-                    end
-                end
-            end
-        end)
+    if ok then
+        return result ~= false
     end
-
+    Restock._stats.errors += 1
     return false
-end
-
----------------------------------------------------------------
--- FIND BUY BUTTON IN GUI
----------------------------------------------------------------
-
-function Restock._findBuyButton(gui, seedName)
-    for _, desc in ipairs(gui:GetDescendants()) do
-        if desc:IsA("TextButton") or desc:IsA("ImageButton") then
-            if desc.Name:match(seedName) or
-               (desc.Text and desc.Text:match(seedName)) then
-                return desc
-            end
-        end
-    end
-    return nil
-end
-
----------------------------------------------------------------
--- ESTIMATE PRICE
----------------------------------------------------------------
-
-function Restock._estimatePrice(seedName)
-    -- Common seed prices (approximate)
-    local prices = {
-        ["Carrot"] = 10,
-        ["Strawberry"] = 50,
-        ["Blueberry"] = 400,
-        ["Tomato"] = 800,
-        ["Corn"] = 1300,
-        ["Tulip"] = 1000,
-        ["Apple"] = 3250,
-        ["Bamboo"] = 4000,
-        ["Coconut"] = 6000,
-        ["Pineapple"] = 7500,
-        ["Banana"] = 7000,
-        ["Cactus"] = 15000,
-        ["Grape"] = 850000,
-        ["Mango"] = 1000000,
-        ["Dragon Fruit"] = 1200000,
-        ["Mushroom"] = 150000,
-        ["Cherry"] = 500000,
-        ["Pomegranate"] = 750000,
-        ["Sunflower"] = 1250000,
-        ["Venus Fly Trap"] = 2000000,
-        ["Moon Bloom"] = 3000000,
-        ["Dragon's Breath"] = 2500000,
-        ["Ghost Pepper"] = 1800000,
-    }
-    return prices[seedName] or 50000
-end
-
----------------------------------------------------------------
--- GET TIME UNTIL RESTOCK
----------------------------------------------------------------
-
-function Restock.getTimeUntilRestock()
-    local RS = game:GetService("ReplicatedStorage")
-    local nextRestock = RS:FindFirstChild("StockValues")
-        and RS.StockValues:FindFirstChild("SeedShop")
-        and RS.StockValues.SeedShop:FindFirstChild("UnixNextRestock")
-
-    if nextRestock then
-        local restockTime = nextRestock.Value or 0
-        local now = os.time()
-        return math.max(0, restockTime - now)
-    end
-    return -1
 end
 
 ---------------------------------------------------------------
@@ -1553,6 +1466,7 @@ end
 
 function Restock.stop()
     Restock._running = false
+    Restock._thread = nil
     for _, conn in ipairs(Restock._connections) do
         pcall(function() conn:Disconnect() end)
     end
@@ -1562,7 +1476,6 @@ end
 function Restock.getStats()
     return Restock._stats
 end
-
 end
 
 ---------------------------------------------------------------
