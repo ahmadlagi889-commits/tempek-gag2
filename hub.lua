@@ -17,12 +17,13 @@ local Config = {
         AutoHarvest = false, AutoSell = false, AutoWater = false,
         AutoPlant = false, RestockSniper = false, MutationTracker = false,
         WeatherBot = false, StealBot = false, InventoryOptimizer = false,
-        AntiAfk = true,
+        AutoBuyPet = false, AntiAfk = true,
     },
     Timings = {
         HarvestInterval = 2, SellInterval = 5, WaterInterval = 3,
         PlantInterval = 5, RestockPollInterval = 1, MutationScanInterval = 3,
         WeatherPollInterval = 5, StealInterval = 1.5, InventoryCheckInterval = 10,
+        PetHatchInterval = 2,
     },
     Restock = {
         TargetSeeds = {},
@@ -34,6 +35,7 @@ local Config = {
     Plant = { OnlyEmptyPlots = true },
     Water = { WaterAll = false },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
+    Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
     Mutation = {
         AlertMutations = { "Rainbow", "Starstruck", "Gold", "Frozen", "Electric", "Bloodlit", "Chained" },
         PriceMultipliers = { Gold = 20, Rainbow = 50, Electric = 12, Frozen = 10, Bloodlit = 5, Chained = 8, Starstruck = 100 },
@@ -2212,7 +2214,263 @@ do
 end
 
 ---------------------------------------------------------------
--- MODULE: INVENTORY OPTIMIZER
+-- MODULE: AUTO BUY PET (Egg Hatch + Rarity Filter)
+-- Reference: Controllers_EggHandleController, EggOpenController
+-- Remotes: Egg.OpenEgg(eggName), Egg.ConfirmEgg(eggName, petName, size)
+--          SellPet(petId)
+-- Data: SharedModules.EggData, SharedData.PetData
+---------------------------------------------------------------
+
+Modules.AutoBuyPet = {}
+do
+    local M = Modules.AutoBuyPet
+    local Pet = M
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+Pet._running = false
+Pet._thread  = nil
+Pet._connections = {}
+Pet._stats = { hatched = 0, kept = 0, sold = 0, errors = 0, noEggs = 0 }
+
+-- Rarity priority (lower = more common)
+local RARITY_ORDER = {
+    Common = 1, Uncommon = 2, Rare = 3,
+    Legendary = 4, Epic = 4, Mythic = 5, Super = 6,
+}
+
+-- Load PetData for species rarity lookup
+local PetData = nil
+pcall(function()
+    PetData = require(ReplicatedStorage:WaitForChild("SharedData"):WaitForChild("PetData"))
+end)
+
+-- Get rarity of a pet species from PetData
+function Pet._getSpeciesRarity(petName)
+    if PetData and PetData[petName] then
+        return PetData[petName].Rarity or "Common"
+    end
+    return "Common"
+end
+
+-- Check if a pet passes the rarity filter
+function Pet._passesFilter(petName, size, minRarity)
+    local speciesRarity = Pet._getSpeciesRarity(petName)
+    local gotRank = RARITY_ORDER[speciesRarity] or 1
+    local wantRank = RARITY_ORDER[minRarity] or 1
+    if gotRank < wantRank then return false end
+    -- Also check size filter (Huge always passes)
+    if size == "Huge" then return true end
+    return true
+end
+
+---------------------------------------------------------------
+-- FIND EGG TOOLS IN BACKPACK
+-- Tools with "Egg" attribute = egg name
+---------------------------------------------------------------
+
+function Pet._findEggTools()
+    local lp = Players.LocalPlayer
+    local backpack = lp and lp:FindFirstChild("Backpack")
+    if not backpack then return {} end
+    local eggs = {}
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            local eggName = tool:GetAttribute("Egg")
+            if eggName and eggName ~= "" then
+                table.insert(eggs, { tool = tool, eggName = eggName })
+            end
+        end
+    end
+    return eggs
+end
+
+---------------------------------------------------------------
+-- HATCH ONE EGG
+-- 1. Listen for ReplicateOpenEgg once
+-- 2. Fire Egg.OpenEgg(eggName)
+-- 3. Wait for result (petName, size, type)
+-- 4. Fire Egg.ConfirmEgg(eggName, petName, size)
+---------------------------------------------------------------
+
+function Pet._hatchEgg(eggName, Net)
+    local result = nil
+    local done = false
+
+    -- Hook ReplicateOpenEgg once
+    local conn
+    conn = Net.on("Egg.ReplicateOpenEgg", function(player, eName, petName, size, pos, petType, extra)
+        if player == Players.LocalPlayer and eName == eggName then
+            result = { petName = petName, size = size, petType = petType }
+            done = true
+            if conn then conn:Disconnect() end
+        end
+    end)
+
+    -- Fire OpenEgg
+    local fireOk = pcall(function()
+        Net.fire("Egg.OpenEgg", eggName)
+    end)
+
+    if not fireOk then
+        if conn then conn:Disconnect() end
+        return nil
+    end
+
+    -- Wait for result (max 5s)
+    local t = 0
+    while not done and t < 5 do
+        task.wait(0.1)
+        t = t + 0.1
+    end
+
+    if conn then pcall(function() conn:Disconnect() end) end
+
+    if not result then return nil end
+
+    -- Confirm the egg
+    pcall(function()
+        Net.fire("Egg.ConfirmEgg", eggName, result.petName, result.size or "")
+    end)
+
+    return result
+end
+
+---------------------------------------------------------------
+-- SELL PET (find pet tool in backpack by species, sell via NPCS.SellPet)
+-- Pet tool attributes: "Pet" = species name, "PetId" = unique ID
+---------------------------------------------------------------
+
+function Pet._findAndSellPet(petName, Net)
+    -- Wait a bit for pet tool to appear in backpack after ConfirmEgg
+    task.wait(1)
+    local lp = Players.LocalPlayer
+    local backpack = lp and lp:FindFirstChild("Backpack")
+    if not backpack then return false end
+
+    -- Also check character (might be equipped)
+    local char = lp.Character
+    local function scanContainer(container)
+        if not container then return nil end
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") then
+                local toolPetName = tool:GetAttribute("Pet")
+                if toolPetName == petName then
+                    local petId = tool:GetAttribute("PetId")
+                    if petId then
+                        return { tool = tool, petId = petId }
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    local found = scanContainer(backpack) or scanContainer(char)
+    if not found then
+        print("[GAG Hub] Sell: pet tool not found for", petName)
+        return false
+    end
+
+    -- Equip the tool first (NPC sell requires holding it)
+    if char then
+        pcall(function() found.tool.Parent = char end)
+        task.wait(0.3)
+    end
+
+    -- Fire NPCS.SellPet(petId) — invoke for response
+    local ok, result = pcall(function()
+        return Net.invoke("NPCS.SellPet", found.petId)
+    end)
+
+    if ok and result and result.Success then
+        print("[GAG Hub] Sold pet:", petName, "for", tostring(result.SellPrice or "?"))
+        return true
+    end
+
+    return false
+end
+
+---------------------------------------------------------------
+-- AUTO HATCH LOOP
+---------------------------------------------------------------
+
+function Pet._autoHatch(petConfig, Net, Utils)
+    local minRarity = petConfig.MinRarity or "Rare"
+    local autoSell = petConfig.AutoSellUnwanted or false
+
+    -- Find egg tools in backpack
+    local eggs = Pet._findEggTools()
+    if #eggs == 0 then
+        Pet._stats.noEggs += 1
+        return
+    end
+
+    -- Hatch one egg per cycle
+    local egg = eggs[1]
+    local result = Pet._hatchEgg(egg.eggName, Net)
+
+    if not result then
+        Pet._stats.errors += 1
+        return
+    end
+
+    Pet._stats.hatched += 1
+    local speciesRarity = Pet._getSpeciesRarity(result.petName)
+    local passes = Pet._passesFilter(result.petName, result.size, minRarity)
+
+    local sizeStr = result.size and (" [" .. result.size .. "]") or ""
+    print("[GAG Hub] Hatched:", result.petName, sizeStr, "(" .. speciesRarity .. ")")
+
+    if passes then
+        Pet._stats.kept += 1
+        print("[GAG Hub] KEPT - matches rarity filter:", minRarity .. "+")
+    else
+        if autoSell then
+            local sold = Pet._findAndSellPet(result.petName, Net)
+            if sold then
+                Pet._stats.sold += 1
+                print("[GAG Hub] SOLD - below rarity filter")
+            end
+        else
+            print("[GAG Hub] Below filter (" .. minRarity .. "+), kept in inventory")
+        end
+    end
+end
+
+---------------------------------------------------------------
+-- START / STOP
+---------------------------------------------------------------
+
+function Pet.start(config, Net, Utils)
+    if Pet._running then return end
+    Pet._running = true
+
+    local interval = config.Timings.PetHatchInterval or 2
+    local petConfig = config.Pet or {}
+
+    Pet._thread = task.spawn(function()
+        while Pet._running do
+            Pet._autoHatch(petConfig, Net, Utils)
+            task.wait(interval)
+        end
+    end)
+
+    print("[GAG Hub] Auto-Buy Pet started")
+end
+
+function Pet.stop()
+    Pet._running = false
+    for _, conn in ipairs(Pet._connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    Pet._connections = {}
+end
+
+function Pet.getStats()
+    return Pet._stats
+end
+
+end
 ---------------------------------------------------------------
 
 Modules.InventoryOptimizer = {}
@@ -2506,6 +2764,17 @@ local function createUI()
     InvTab:CreateSection("Inventory Optimizer")
     InvTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="InventoryOptimizer",Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
     InvTab:CreateSlider({Name="Check Interval",Range={5,60},Increment=5,Suffix="s",CurrentValue=Config.Timings.InventoryCheckInterval,Flag="InventoryCheckInterval",Callback=function(v) Config.Timings.InventoryCheckInterval = v end})
+
+    -------------------------------------------------------
+    -- PETS (Auto Egg Hatch + Rarity Filter)
+    -------------------------------------------------------
+    local PetTab = Window:CreateTab("Pets", nil)
+    PetTab:CreateSection("Auto Egg Hatch")
+    PetTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="AutoBuyPet",Callback=function(v) if v then startModule("AutoBuyPet") else stopModule("AutoBuyPet") end end})
+    PetTab:CreateSlider({Name="Hatch Interval",Range={1,10},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.PetHatchInterval,Flag="PetHatchInterval",Callback=function(v) Config.Timings.PetHatchInterval = v end})
+    PetTab:CreateSection("Rarity Filter")
+    PetTab:CreateDropdown({Name="Min Rarity",Options={"Common","Uncommon","Rare","Legendary","Mythic","Super"},CurrentOption={Config.Pet.MinRarity},MultipleOptions=false,Flag="PetMinRarity",Callback=function(opt) Config.Pet.MinRarity = type(opt)=="table" and opt[1] or opt end})
+    PetTab:CreateToggle({Name="Auto Sell Unwanted",CurrentValue=Config.Pet.AutoSellUnwanted,Flag="PetAutoSell",Callback=function(v) Config.Pet.AutoSellUnwanted = v end})
 
     -------------------------------------------------------
     -- STATUS
