@@ -59,6 +59,7 @@ end
 -- CORE: NETWORKING (inlined from core/networking.lua)
 ---------------------------------------------------------------
 
+local Networking = {}
 local RS = game:GetService("ReplicatedStorage")
 
 -- Internal cache
@@ -294,6 +295,7 @@ Networking._resolve()
 -- CORE: UTILITIES (inlined from core/utils.lua)
 ---------------------------------------------------------------
 
+local Utils = {}
 local Players = game:GetService("Players")
 local RS      = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -590,6 +592,7 @@ end
 -- CORE: ANTI-AFK (inlined from core/antiafk.lua)
 ---------------------------------------------------------------
 
+local AntiAfk = {}
 local Players    = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 local GuiService  = game:GetService("GuiService")
@@ -758,6 +761,7 @@ end
 Modules.AutoHarvest = {}
 do
     local M = Modules.AutoHarvest
+    local Harvest = M
 Harvest._running = false
 Harvest._thread  = nil
 Harvest._connections = {}
@@ -909,6 +913,7 @@ end
 Modules.AutoSell = {}
 do
     local M = Modules.AutoSell
+    local Sell = M
 Sell._running = false
 Sell._thread  = nil
 Sell._connections = {}
@@ -1053,6 +1058,7 @@ end
 Modules.AutoWater = {}
 do
     local M = Modules.AutoWater
+    local Water = M
 Water._running = false
 Water._thread  = nil
 Water._connections = {}
@@ -1153,6 +1159,7 @@ end
 Modules.AutoPlant = {}
 do
     local M = Modules.AutoPlant
+    local Plant = M
 Plant._running = false
 Plant._thread  = nil
 Plant._connections = {}
@@ -1353,6 +1360,7 @@ end
 Modules.RestockSniper = {}
 do
     local M = Modules.RestockSniper
+    local Restock = M
 Restock._running = false
 Restock._thread  = nil
 Restock._connections = {}
@@ -1601,6 +1609,7 @@ end
 Modules.MutationTracker = {}
 do
     local M = Modules.MutationTracker
+    local Mutation = M
 Mutation._running = false
 Mutation._thread  = nil
 Mutation._connections = {}
@@ -1809,6 +1818,7 @@ end
 Modules.WeatherBot = {}
 do
     local M = Modules.WeatherBot
+    local Weather = M
 Weather._running = false
 Weather._thread  = nil
 Weather._connections = {}
@@ -2058,6 +2068,7 @@ end
 Modules.StealBot = {}
 do
     local M = Modules.StealBot
+    local Steal = M
 Steal._running = false
 Steal._thread  = nil
 Steal._connections = {}
@@ -2295,6 +2306,7 @@ end
 Modules.InventoryOptimizer = {}
 do
     local M = Modules.InventoryOptimizer
+    local Inventory = M
 Inventory._running = false
 Inventory._thread  = nil
 Inventory._connections = {}
