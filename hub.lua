@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "8fba843"
+local VERSION = "e3b0d9b"
 
 local Config = {
     Features = {
