@@ -789,10 +789,21 @@ do
         return hum and hum.Health > 0
     end
 
+    function Harvest._isHarvestable(fruitModel)
+        if not fruitModel or not fruitModel.Parent then return false end
+        local harvestPart = fruitModel:FindFirstChild("HarvestPart")
+        if not harvestPart then return false end
+        local prompt = harvestPart:FindFirstChild("HarvestPrompt")
+        if not prompt then return false end
+        if not prompt.Enabled then return false end
+        return true
+    end
+
     ---------------------------------------------------------------
-    -- COLLECT ALL FRUITS ON MY PLOT — FAST BATCH
-    -- Skip prompt checks, fire CollectFruit for every plant/fruit
-    -- Batch all fires first, don't wait per item
+    -- COLLECT ALL FRUITS ON MY PLOT (direct remote, no prompt)
+    -- Two harvest paths:
+    --   Multi: Plant → Fruits → FruitModel(HarvestPart.HarvestPrompt) → CollectFruit(plantId, fruitId)
+    --   Single: Plant → HarvestPart.HarvestPrompt (no Fruits folder) → CollectFruit(plantId, "")
     ---------------------------------------------------------------
 
     function Harvest._collectAll(Net)
@@ -803,9 +814,6 @@ do
         local count = 0
         local plantsFolder = plot:FindFirstChild("Plants")
         if not plantsFolder then return 0 end
-
-        -- Collect all plant+fruit pairs first, then batch fire
-        local toCollect = {}
         for _, plantModel in ipairs(plantsFolder:GetChildren()) do
             if not Harvest._running then break end
             local plantId = plantModel:GetAttribute("PlantId")
@@ -815,26 +823,24 @@ do
             local fruitsFolder = plantModel:FindFirstChild("Fruits")
             if fruitsFolder then
                 for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
+                    if not Harvest._running then break end
+                    if not Harvest._isHarvestable(fruitModel) then continue end
                     local fruitId = fruitModel:GetAttribute("FruitId")
-                    table.insert(toCollect, { plantId = plantId, fruitId = fruitId or "" })
+                    pcall(function()
+                        Net.fire("Garden.CollectFruit", plantId, fruitId or "")
+                    end)
+                    count += 1
                 end
-            else
-                -- Path B: Single-harvest (no Fruits folder)
-                table.insert(toCollect, { plantId = plantId, fruitId = "" })
+            end
+
+            -- Path B: Single-harvest (HarvestPrompt directly on plant)
+            if Harvest._isHarvestable(plantModel) then
+                pcall(function()
+                    Net.fire("Garden.CollectFruit", plantId, "")
+                end)
+                count += 1
             end
         end
-
-        -- Batch fire all at once — no sequential waiting
-        for _, item in ipairs(toCollect) do
-            if not Harvest._running then break end
-            task.spawn(function()
-                pcall(function()
-                    Net.fire("Garden.CollectFruit", item.plantId, item.fruitId)
-                end)
-            end)
-            count += 1
-        end
-
         return count
     end
 
@@ -848,24 +854,21 @@ do
 
         local interval = config.Timings.HarvestInterval or 0.5
 
-        -- [METHOD 1] Listen for new fruits and collect IMMEDIATELY (no delay)
+        -- [METHOD 1] Listen for new fruits and collect immediately
         local fruitAddedConn = Net.on("Garden.FruitAdded", function(plantId, fruitId, fruitName, data)
             if not Harvest._running then return end
             if not Harvest._isAlive() then return end
-            -- Fire immediately, no task.wait
-            task.spawn(function()
-                pcall(function()
-                    Net.fire("Garden.CollectFruit", plantId, fruitId or "")
-                end)
+            task.wait(0.15)
+            pcall(function()
+                Net.fire("Garden.CollectFruit", plantId, fruitId or "")
             end)
             Harvest._stats.harvested += 1
-            print("[GAG Hub] Harvested (event):", fruitName or "?", "plant:", plantId)
         end)
         if fruitAddedConn then
             table.insert(Harvest._connections, fruitAddedConn)
         end
 
-        -- [METHOD 2] Fast periodic scan
+        -- [METHOD 2] Periodic scan — walk garden tree, fire CollectFruit directly
         Harvest._thread = task.spawn(function()
             while Harvest._running do
                 Harvest._stats.scans += 1
