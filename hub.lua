@@ -12,6 +12,8 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
+local VERSION = "8fba843"
+
 local Config = {
     Features = {
         AutoHarvest = false, AutoSell = false, AutoWater = false,
@@ -3243,7 +3245,7 @@ local function createUI()
     Stats.init()
 
     local Window = Rayfield:CreateWindow({
-        Name = "🌿 " .. Config.UI.Title,
+        Name = "🌿 " .. Config.UI.Title .. " v" .. VERSION,
         LoadingTitle = Config.UI.Subtitle,
         LoadingSubtitle = "by GAG Hub",
         ConfigurationSaving = { Enabled = true, FolderName = "GAGHub", FileName = "config" },
