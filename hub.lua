@@ -1621,13 +1621,16 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
         for i = 1, maxBuys do
             if not Restock._running then break end
 
-            local ok, price = Restock._buySeed(Net, seedName)
-            if ok then
+            local prevStock = Restock._getStock(seedName)
+            Restock._buySeed(Net, seedName)
+            task.wait(0.15) -- wait for server to update stock
+            local newStock = Restock._getStock(seedName)
+
+            if newStock < prevStock then
                 buyCount += 1
                 Restock._stats.bought += 1
-                task.wait(0.05) -- minimal delay between buys
             else
-                break -- buy failed, probably out of stock
+                break -- stock didn't change, buy failed
             end
         end
 
