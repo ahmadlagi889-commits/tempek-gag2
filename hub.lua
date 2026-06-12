@@ -27,7 +27,7 @@ local Config = {
     Restock = {
         TargetSeeds = {},
         MaxSpendPerCycle = 500000,
-        BlacklistedSeeds = { "Carrot", "Strawberry", "Tomato" },
+        BlacklistedSeeds = {},
     },
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
