@@ -2910,7 +2910,18 @@ end
 -- RAYFIELD UI
 ---------------------------------------------------------------
 
-local AllSeeds = {"Carrot","Strawberry","Tomato","Blueberry","Apple","Pinetree","Bamboo","Pumpkin","Cactus","Pineapple","Green Bean","Banana","Grape","Mushroom","Coconut","Mango","Thorn Rose","Dragon Fruit","Acorn","Cherry","Sunflower","Venus Fly Trap","Lotus","Pomegranate","Beanstalk","Poison Apple","Moon Bloom","Dragon's Breath","Poison Ivy","Glow Mushroom","Ghost Pepper","Horned Melon","Corn","Baby Cactus","Tulip","Romanesco"}
+local AllSeeds = {
+    -- Sorted by PurchasePrice: cheap → expensive
+    "Carrot","Baby Cactus","Glow Mushroom","Romanesco","Horned Melon",
+    "Strawberry","Blueberry","Tulip","Tomato","Apple","Bamboo",
+    "Corn","Cactus","Pineapple","Mushroom","Green Bean",
+    "Banana","Grape","Coconut","Mango","Dragon Fruit",
+    "Acorn","Cherry","Sunflower","Venus Fly Trap","Poison Apple",
+    "Pomegranate","Ghost Pepper","Poison Ivy",
+    "Moon Bloom","Dragon's Breath",
+    -- Special/event seeds (no shop price)
+    "Pinetree","Pumpkin","Thorn Rose","Beanstalk","Lotus",
+}
 
 local function createUI()
     local Rayfield = nil
