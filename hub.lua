@@ -600,7 +600,7 @@ local RS          = game:GetService("ReplicatedStorage")
 
 local LP = Players.LocalPlayer
 
-Antiafk._running = false
+AntiAfk._running = false
 AntiAfk._thread  = nil
 AntiAfk._rejoinThread = nil
 AntiAfk._stats   = { actions = 0, rejoins = 0, lastAction = 0 }
