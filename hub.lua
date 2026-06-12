@@ -1150,16 +1150,91 @@ end
 
 ---------------------------------------------------------------
 -- MODULE: AUTO PLANT
+-- Reference: Controllers_PlantController.module.lua
+-- Remote: Plant.PlantSeed(position: Vector3, seedName: String, toolInstance: Instance)
+-- Plant areas: CollectionService:GetTagged("PlantArea")
+-- Seed tool: Character tool with "SeedTool" attribute
 ---------------------------------------------------------------
 
 Modules.AutoPlant = {}
 do
     local M = Modules.AutoPlant
     local Plant = M
+    local Players = game:GetService("Players")
+    local CollectionService = game:GetService("CollectionService")
 Plant._running = false
 Plant._thread  = nil
 Plant._connections = {}
 Plant._stats = { planted = 0, scans = 0, errors = 0, noSeeds = 0 }
+
+---------------------------------------------------------------
+-- GET EQUIPPED SEED TOOL (matching decompiled GetEquippedTool)
+-- Must be a Tool with "SeedTool" attribute = seed name
+---------------------------------------------------------------
+
+function Plant._getEquippedSeed()
+    local lp = Players.LocalPlayer
+    local char = lp and lp.Character
+    if not char then return nil, nil end
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if not tool then return nil, nil end
+    local seedName = tool:GetAttribute("SeedTool")
+    if not seedName then return nil, nil end
+    return seedName, tool
+end
+
+---------------------------------------------------------------
+-- GET MY PLOT (matching decompiled GetPlayerPlot)
+---------------------------------------------------------------
+
+function Plant._getMyPlot()
+    local lp = Players.LocalPlayer
+    if not lp then return nil end
+    local plotId = lp:GetAttribute("PlotId")
+    if not plotId then return nil end
+    return workspace:FindFirstChild("Gardens") and workspace.Gardens:FindFirstChild("Plot" .. tostring(plotId))
+end
+
+---------------------------------------------------------------
+-- CHECK IF PLANT SPOT IS EMPTY
+-- Raycast with Plants folder to check for nearby existing plants
+---------------------------------------------------------------
+
+function Plant._isSpotEmpty(spotPos, myPlot)
+    local plantsFolder = myPlot:FindFirstChild("Plants")
+    if not plantsFolder then return true end
+    for _, plantModel in ipairs(plantsFolder:GetChildren()) do
+        local plantId = plantModel:GetAttribute("PlantId")
+        if plantId then
+            local root = plantModel.PrimaryPart or plantModel:FindFirstChildWhichIsA("BasePart")
+            if root then
+                local dist = (Vector2.new(root.Position.X, root.Position.Z) - Vector2.new(spotPos.X, spotPos.Z)).Magnitude
+                if dist < 1 then
+                    return false -- too close to existing plant
+                end
+            end
+        end
+    end
+    return true
+end
+
+---------------------------------------------------------------
+-- FIND EMPTY PLANT SPOTS
+-- Use CollectionService:GetTagged("PlantArea") — same as decompiled
+-- Filter to player's plot, check no existing plant nearby
+---------------------------------------------------------------
+
+function Plant._findEmptySpots(myPlot)
+    local spots = {}
+    for _, part in ipairs(CollectionService:GetTagged("PlantArea")) do
+        if part:IsA("BasePart") and part:IsDescendantOf(myPlot) then
+            if Plant._isSpotEmpty(part.Position, myPlot) then
+                table.insert(spots, part)
+            end
+        end
+    end
+    return spots
+end
 
 ---------------------------------------------------------------
 -- START
@@ -1187,148 +1262,38 @@ end
 ---------------------------------------------------------------
 
 function Plant._autoPlant(plantConfig, Net, Utils)
-    local garden = Utils.getMyGarden()
-    if not garden then return end
-
     Plant._stats.scans += 1
 
-    -- Check for empty soil patches
-    local soilPatches = {}
-    for _, child in ipairs(garden:GetDescendants()) do
-        if child:IsA("BasePart") and (
-            child.Name == "Soil" or
-            child.Name == "Dirt" or
-            child:GetAttribute("PlantSpot") or
-            child.Name:match("^Soil%d*$")
-        ) then
-            -- Check if this spot is empty (no plant attached)
-            local hasPlant = false
-            for _, sibling in ipairs(child:GetChildren()) do
-                if sibling:GetAttribute("SeedName") then
-                    hasPlant = true
-                    break
-                end
-            end
-            -- Also check nearby descendants
-            if not hasPlant then
-                for _, desc in ipairs(garden:GetDescendants()) do
-                    if desc:GetAttribute("SeedName") then
-                        local dist = 0
-                        pcall(function()
-                            local part = desc:FindFirstChildWhichIsA("BasePart")
-                            if part and child then
-                                dist = (part.Position - child.Position).Magnitude
-                            end
-                        end)
-                        if dist < 3 then
-                            hasPlant = true
-                            break
-                        end
-                    end
-                end
-            end
-
-            if not hasPlant then
-                table.insert(soilPatches, child)
-            end
-        end
-    end
-
-    if #soilPatches == 0 then return end
-
-    -- Get available seeds from backpack
-    local availableSeeds = Plant._getAvailableSeeds(Utils)
-
-    if #availableSeeds == 0 then
+    -- Get equipped seed tool
+    local seedName, toolInstance = Plant._getEquippedSeed()
+    if not seedName then
         Plant._stats.noSeeds += 1
         return
     end
 
-    -- Plant seeds in empty spots
-    local seedsPlanted = 0
-    for i, soil in ipairs(soilPatches) do
-        if i > #availableSeeds then break end
+    -- Get plot
+    local myPlot = Plant._getMyPlot()
+    if not myPlot then return end
 
-        local seedName = availableSeeds[i]
+    -- Find empty spots via PlantArea tags
+    local spots = Plant._findEmptySpots(myPlot)
+    if #spots == 0 then return end
 
-        -- Method 1: Use Plant.PlantSeed remote
-        local ok = Net.fire("Plant.PlantSeed", seedName, soil.Position)
-        if ok then
-            Plant._stats.planted += 1
-            seedsPlanted += 1
-        else
-            -- Method 2: Try Garden.PotPlant
-            ok = Net.fire("Garden.PotPlant", seedName)
-            if ok then
-                Plant._stats.planted += 1
-                seedsPlanted += 1
-            else
-                Plant._stats.errors += 1
-            end
-        end
+    -- Plant in first empty spot
+    local spot = spots[1]
+    local pos = spot.Position
 
-        task.wait(0.2) -- small delay between plantings
-    end
-end
-
----------------------------------------------------------------
--- GET AVAILABLE SEEDS
----------------------------------------------------------------
-
-function Plant._getAvailableSeeds(Utils)
-    local items = Utils.getBackpackItems()
-    local seeds = {}
-
-    for _, item in ipairs(items) do
-        if item.Type == "SeedTool" or
-           item.Type == "Seed" or
-           item.Name:match("Seed$") or
-           item.Instance:GetAttribute("SeedName") then
-            local seedName = item.Instance:GetAttribute("SeedName") or item.Name
-            table.insert(seeds, seedName)
-        end
-    end
-
-    -- Sort by priority
-    table.sort(seeds, function(a, b)
-        return Plant._getSeedPriority(a) < Plant._getSeedPriority(b)
+    -- Fire PlantSeed(position, seedName, toolInstance) — correct arg order
+    local ok = pcall(function()
+        Net.fire("Plant.PlantSeed", pos, seedName, toolInstance)
     end)
 
-    return seeds
-end
-
--- Get seed priority (lower = higher priority)
-function Plant._getSeedPriority(seedName)
-    local priorityMap = {
-        ["Mushroom"] = 1,
-        ["Moon Bloom"] = 2,
-        ["Lotus"] = 3,
-        ["Sunflower"] = 4,
-        ["Venus Fly Trap"] = 5,
-        ["Dragon's Breath"] = 6,
-        ["Ghost Pepper"] = 7,
-        ["Pomegranate"] = 8,
-        ["Cherry"] = 9,
-        ["Dragon Fruit"] = 10,
-        ["Mango"] = 11,
-        ["Grape"] = 12,
-        ["Coconut"] = 13,
-        ["Banana"] = 14,
-        ["Pineapple"] = 15,
-    }
-    return priorityMap[seedName] or 999
-end
-
----------------------------------------------------------------
--- MANUAL PLANT ONE
----------------------------------------------------------------
-
-function Plant.plantOne(Net, seedName, position)
-    local ok = Net.fire("Plant.PlantSeed", seedName, position)
     if ok then
         Plant._stats.planted += 1
+        print("[GAG Hub] Planted:", seedName, "at", tostring(pos))
+    else
+        Plant._stats.errors += 1
     end
-    return ok
 end
 
 ---------------------------------------------------------------
