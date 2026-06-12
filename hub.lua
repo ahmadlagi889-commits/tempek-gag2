@@ -20,7 +20,7 @@ local Config = {
         AutoBuyPet = false, AntiAfk = true,
     },
     Timings = {
-        HarvestInterval = 2, SellInterval = 5, WaterInterval = 3,
+        HarvestInterval = 0.5, SellInterval = 5, WaterInterval = 3,
         PlantInterval = 5, RestockPollInterval = 1, MutationScanInterval = 3,
         WeatherPollInterval = 5, StealInterval = 1.5, InventoryCheckInterval = 10,
         PetHatchInterval = 2,
@@ -789,21 +789,10 @@ do
         return hum and hum.Health > 0
     end
 
-    function Harvest._isHarvestable(fruitModel)
-        if not fruitModel or not fruitModel.Parent then return false end
-        local harvestPart = fruitModel:FindFirstChild("HarvestPart")
-        if not harvestPart then return false end
-        local prompt = harvestPart:FindFirstChild("HarvestPrompt")
-        if not prompt then return false end
-        if not prompt.Enabled then return false end
-        return true
-    end
-
     ---------------------------------------------------------------
-    -- COLLECT ALL FRUITS ON MY PLOT (direct remote, no prompt)
-    -- Two harvest paths:
-    --   Multi: Plant → Fruits → FruitModel(HarvestPart.HarvestPrompt) → CollectFruit(plantId, fruitId)
-    --   Single: Plant → HarvestPart.HarvestPrompt (no Fruits folder) → CollectFruit(plantId, "")
+    -- COLLECT ALL FRUITS ON MY PLOT — FAST BATCH
+    -- Skip prompt checks, fire CollectFruit for every plant/fruit
+    -- Batch all fires first, don't wait per item
     ---------------------------------------------------------------
 
     function Harvest._collectAll(Net)
@@ -814,6 +803,9 @@ do
         local count = 0
         local plantsFolder = plot:FindFirstChild("Plants")
         if not plantsFolder then return 0 end
+
+        -- Collect all plant+fruit pairs first, then batch fire
+        local toCollect = {}
         for _, plantModel in ipairs(plantsFolder:GetChildren()) do
             if not Harvest._running then break end
             local plantId = plantModel:GetAttribute("PlantId")
@@ -823,26 +815,26 @@ do
             local fruitsFolder = plantModel:FindFirstChild("Fruits")
             if fruitsFolder then
                 for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
-                    if not Harvest._running then break end
-                    if not Harvest._isHarvestable(fruitModel) then continue end
                     local fruitId = fruitModel:GetAttribute("FruitId")
-                    pcall(function()
-                        Net.fire("Garden.CollectFruit", plantId, fruitId or "")
-                    end)
-                    count += 1
-                    print("[GAG Hub] Harvested:", fruitId or "?", "plant:", plantId)
+                    table.insert(toCollect, { plantId = plantId, fruitId = fruitId or "" })
                 end
-            end
-
-            -- Path B: Single-harvest (HarvestPrompt directly on plant)
-            if Harvest._isHarvestable(plantModel) then
-                pcall(function()
-                    Net.fire("Garden.CollectFruit", plantId, "")
-                end)
-                count += 1
-                print("[GAG Hub] Harvested (single):", plantId)
+            else
+                -- Path B: Single-harvest (no Fruits folder)
+                table.insert(toCollect, { plantId = plantId, fruitId = "" })
             end
         end
+
+        -- Batch fire all at once — no sequential waiting
+        for _, item in ipairs(toCollect) do
+            if not Harvest._running then break end
+            task.spawn(function()
+                pcall(function()
+                    Net.fire("Garden.CollectFruit", item.plantId, item.fruitId)
+                end)
+            end)
+            count += 1
+        end
+
         return count
     end
 
@@ -854,15 +846,17 @@ do
         if Harvest._running then return end
         Harvest._running = true
 
-        local interval = config.Timings.HarvestInterval or 2
+        local interval = config.Timings.HarvestInterval or 0.5
 
-        -- [METHOD 1] Listen for new fruits and collect immediately
+        -- [METHOD 1] Listen for new fruits and collect IMMEDIATELY (no delay)
         local fruitAddedConn = Net.on("Garden.FruitAdded", function(plantId, fruitId, fruitName, data)
             if not Harvest._running then return end
             if not Harvest._isAlive() then return end
-            task.wait(0.15)
-            pcall(function()
-                Net.fire("Garden.CollectFruit", plantId, fruitId or "")
+            -- Fire immediately, no task.wait
+            task.spawn(function()
+                pcall(function()
+                    Net.fire("Garden.CollectFruit", plantId, fruitId or "")
+                end)
             end)
             Harvest._stats.harvested += 1
             print("[GAG Hub] Harvested (event):", fruitName or "?", "plant:", plantId)
@@ -871,7 +865,7 @@ do
             table.insert(Harvest._connections, fruitAddedConn)
         end
 
-        -- [METHOD 2] Periodic scan — walk garden tree, fire CollectFruit directly
+        -- [METHOD 2] Fast periodic scan
         Harvest._thread = task.spawn(function()
             while Harvest._running do
                 Harvest._stats.scans += 1
@@ -1589,7 +1583,8 @@ function Restock.start(config, Net, Utils)
 end
 
 ---------------------------------------------------------------
--- POLL AND BUY
+-- POLL AND BUY — DRAIN STOCK
+-- For each target seed: buy in loop until stock == 0
 ---------------------------------------------------------------
 
 function Restock._pollAndBuy(restockConfig, Net, Utils)
@@ -1603,9 +1598,13 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
         blacklist[name] = true
     end
 
+    local maxSpend = restockConfig.MaxSpendPerCycle or 500000
+    local spent = 0
+
     for _, seedName in ipairs(targets) do
         if not Restock._running then break end
         if blacklist[seedName] then continue end
+        if spent >= maxSpend then break end
 
         local stock = Restock._getStock(seedName)
         if stock == 0 then
@@ -1613,29 +1612,47 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
             continue -- out of stock
         end
 
-        -- stock > 0 or stock == -1 (unknown, try anyway)
-        local ok = Restock._buySeed(Net, seedName)
-        if ok then
-            Restock._stats.bought += 1
-            print("[GAG Hub] Bought: " .. seedName .. " (stock left: " .. stock .. ")")
-            task.wait(0.3)
+        -- DRAIN: buy in loop until stock empty or budget exhausted
+        local buyCount = 0
+        local maxBuys = (stock > 0 and stock) or 50 -- stock=-1 unknown, try 50
+        for i = 1, maxBuys do
+            if not Restock._running then break end
+            if spent >= maxSpend then break end
+
+            local ok, price = Restock._buySeed(Net, seedName)
+            if ok then
+                buyCount += 1
+                Restock._stats.bought += 1
+                spent += (price or 0)
+                task.wait(0.05) -- minimal delay between buys
+            else
+                break -- buy failed, probably out of stock
+            end
+        end
+
+        if buyCount > 0 then
+            print("[GAG Hub] Drained:", seedName, "x" .. buyCount, "(stock was:", stock .. ")")
         end
     end
 end
 
 ---------------------------------------------------------------
--- BUY SEED (actual remote)
+-- BUY SEED (actual remote) — returns ok, price
 ---------------------------------------------------------------
 
 function Restock._buySeed(Net, seedName)
     local ok, result = pcall(function()
-        return Net.fire("SeedShop.PurchaseSeed", seedName)
+        return Net.invoke("SeedShop.PurchaseSeed", seedName)
     end)
     if ok then
-        return result ~= false
+        -- result might be {success, price} or just boolean
+        if type(result) == "table" then
+            return result[1] ~= false, result[2] or 0
+        end
+        return result ~= false, 0
     end
     Restock._stats.errors += 1
-    return false
+    return false, 0
 end
 
 ---------------------------------------------------------------
