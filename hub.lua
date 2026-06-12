@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "e7f692c"
+local VERSION = "6ee0c6e"
 
 local Config = {
     Features = {
@@ -75,7 +75,7 @@ Networking._log = true
 function Networking._resolve()
     if Networking._module then return Networking._module end
 
-    -- Try the standard path
+    -- Method 1: try require()
     local ok, result = pcall(function()
         local shared = RS:WaitForChild("SharedModules", 10)
         if not shared then error("SharedModules not found") end
@@ -84,12 +84,53 @@ function Networking._resolve()
         return require(net)
     end)
 
-    if ok and result then
+    if ok and result and type(result) == "table" then
         Networking._module = result
         return result
     end
 
-    warn("[GAG Hub] Failed to resolve Networking module:", result)
+    -- Method 2: getgc — find already-loaded Networking table by checking for known keys
+    local gcOk, gcResult = pcall(function()
+        if not getgc then return nil end
+        for _, v in pairs(getgc(true)) do
+            if type(v) == "table" then
+                -- Check for unique Networking structure: has Plant.PlantSeed AND Garden.CollectFruit AND SeedShop.PurchaseSeed
+                local hasPlant = type(v.Plant) == "table" and type(v.Plant.PlantSeed) ~= "nil"
+                local hasGarden = type(v.Garden) == "table" and type(v.Garden.CollectFruit) ~= "nil"
+                local hasSeedShop = type(v.SeedShop) == "table" and type(v.SeedShop.PurchaseSeed) ~= "nil"
+                if hasPlant and hasGarden and hasSeedShop then
+                    return v
+                end
+            end
+        end
+        return nil
+    end)
+
+    if gcOk and gcResult and type(gcResult) == "table" then
+        print("[GAG Hub] Networking resolved via getgc")
+        Networking._module = gcResult
+        return gcResult
+    end
+
+    -- Method 3: try require Packet directly, then build minimal net
+    local pktOk, pktResult = pcall(function()
+        local shared = RS:WaitForChild("SharedModules", 10)
+        if not shared then error("SharedModules not found") end
+        local pkt = shared:WaitForChild("Packet", 5)
+        local net = shared:WaitForChild("Networking", 5)
+        if not pkt or not net then return nil end
+        -- Pre-require Packet so it's in module cache, then require Networking
+        require(pkt)
+        return require(net)
+    end)
+
+    if pktOk and pktResult and type(pktResult) == "table" then
+        print("[GAG Hub] Networking resolved via Packet pre-require")
+        Networking._module = pktResult
+        return pktResult
+    end
+
+    warn("[GAG Hub] Failed to resolve Networking module (all methods failed):", result or gcResult or pktResult)
     return nil
 end
 
