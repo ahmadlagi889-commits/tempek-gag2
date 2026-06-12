@@ -2462,6 +2462,8 @@ end
 -- RAYFIELD UI
 ---------------------------------------------------------------
 
+local AllSeeds = {"Carrot","Strawberry","Tomato","Blueberry","Apple","Pinetree","Bamboo","Pumpkin","Cactus","Pineapple","Green Bean","Banana","Grape","Mushroom","Coconut","Mango","Thorn Rose","Dragon Fruit","Acorn","Cherry","Sunflower","Venus Fly Trap","Lotus","Pomegranate","Beanstalk","Poison Apple","Moon Bloom","Dragon's Breath","Poison Ivy","Glow Mushroom","Ghost Pepper","Horned Melon","Corn","Baby Cactus","Tulip","Romanesco"}
+
 local function createUI()
     local Rayfield = nil
     local ok = pcall(function()
@@ -2475,39 +2477,71 @@ local function createUI()
         Discord = { Enabled = false }, KeySystem = false,
     })
 
+    -------------------------------------------------------
+    -- FARMING
+    -------------------------------------------------------
     local FarmTab = Window:CreateTab("Farming", nil)
+    FarmTab:CreateSection("Modules")
     for _, e in ipairs({{"Auto Harvest","AutoHarvest"},{"Auto Sell","AutoSell"},{"Auto Water","AutoWater"},{"Auto Plant","AutoPlant"}}) do
         FarmTab:CreateToggle({Name=e[1],CurrentValue=false,Flag=e[2],Callback=function(v) if v then startModule(e[2]) else stopModule(e[2]) end end})
     end
     FarmTab:CreateSection("Intervals")
-    FarmTab:CreateSlider({Name="Harvest Interval",Range={0.5,10},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.HarvestInterval or 2,Flag="HarvestInterval",Callback=function(v) Config.Timings.HarvestInterval = v end})
-    FarmTab:CreateSlider({Name="Sell Interval",Range={1,30},Increment=1,Suffix="s",CurrentValue=Config.Timings.SellInterval or 5,Flag="SellInterval",Callback=function(v) Config.Timings.SellInterval = v end})
-    FarmTab:CreateSlider({Name="Water Interval",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.WaterInterval or 3,Flag="WaterInterval",Callback=function(v) Config.Timings.WaterInterval = v end})
+    FarmTab:CreateSlider({Name="Harvest",Range={0.5,10},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.HarvestInterval,Flag="HarvestInterval",Callback=function(v) Config.Timings.HarvestInterval = v end})
+    FarmTab:CreateSlider({Name="Sell",Range={1,30},Increment=1,Suffix="s",CurrentValue=Config.Timings.SellInterval,Flag="SellInterval",Callback=function(v) Config.Timings.SellInterval = v end})
+    FarmTab:CreateSlider({Name="Water",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.WaterInterval,Flag="WaterInterval",Callback=function(v) Config.Timings.WaterInterval = v end})
+    FarmTab:CreateSlider({Name="Plant",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.PlantInterval,Flag="PlantInterval",Callback=function(v) Config.Timings.PlantInterval = v end})
 
+    -------------------------------------------------------
+    -- SHOP
+    -------------------------------------------------------
     local ShopTab = Window:CreateTab("Shop", nil)
-    ShopTab:CreateToggle({Name="Restock Sniper",CurrentValue=false,Flag="RestockSniper",Callback=function(v) if v then startModule("RestockSniper") else stopModule("RestockSniper") end end})
-
-    local AllSeeds = {"Carrot","Strawberry","Tomato","Blueberry","Apple","Pinetree","Bamboo","Pumpkin","Cactus","Pineapple","Green Bean","Banana","Grape","Mushroom","Coconut","Mango","Thorn Rose","Dragon Fruit","Acorn","Cherry","Sunflower","Venus Fly Trap","Lotus","Pomegranate","Beanstalk","Poison Apple","Moon Bloom","Dragon's Breath","Poison Ivy","Glow Mushroom","Ghost Pepper","Horned Melon","Corn","Baby Cactus","Tulip","Romanesco"}
+    ShopTab:CreateSection("Restock Sniper")
+    ShopTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="RestockSniper",Callback=function(v) if v then startModule("RestockSniper") else stopModule("RestockSniper") end end})
+    ShopTab:CreateSlider({Name="Poll Interval",Range={0.5,5},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.RestockPollInterval,Flag="RestockPollInterval",Callback=function(v) Config.Timings.RestockPollInterval = v end})
     ShopTab:CreateSection("Target Seeds")
-    ShopTab:CreateDropdown({Name="Buy Targets",Options=AllSeeds,CurrentOption=Config.Restock.TargetSeeds or {},MultipleOptions=true,Flag="RestockTargets",Callback=function(opts) Config.Restock.TargetSeeds = opts end})
-    ShopTab:CreateDropdown({Name="Blacklist",Options=AllSeeds,CurrentOption=Config.Restock.BlacklistedSeeds or {},MultipleOptions=true,Flag="RestockBlacklist",Callback=function(opts) Config.Restock.BlacklistedSeeds = opts end})
-    ShopTab:CreateSection("Settings")
-    ShopTab:CreateSlider({Name="Max Spend/Cycle",Range={10000,5000000},Increment=10000,Suffix=" $",CurrentValue=Config.Restock.MaxSpendPerCycle or 500000,Flag="MaxSpend",Callback=function(v) Config.Restock.MaxSpendPerCycle = v end})
+    ShopTab:CreateDropdown({Name="Buy Targets",Options=AllSeeds,CurrentOption=Config.Restock.TargetSeeds,MultipleOptions=true,Flag="RestockTargets",Callback=function(opts) Config.Restock.TargetSeeds = opts end})
+    ShopTab:CreateDropdown({Name="Blacklist",Options=AllSeeds,CurrentOption=Config.Restock.BlacklistedSeeds,MultipleOptions=true,Flag="RestockBlacklist",Callback=function(opts) Config.Restock.BlacklistedSeeds = opts end})
 
+    -------------------------------------------------------
+    -- MUTATIONS
+    -------------------------------------------------------
     local MutTab = Window:CreateTab("Mutations", nil)
-    MutTab:CreateToggle({Name="Mutation Tracker",CurrentValue=false,Flag="MutationTracker",Callback=function(v) if v then startModule("MutationTracker") else stopModule("MutationTracker") end end})
+    MutTab:CreateSection("Mutation Tracker")
+    MutTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="MutationTracker",Callback=function(v) if v then startModule("MutationTracker") else stopModule("MutationTracker") end end})
+    MutTab:CreateSlider({Name="Scan Interval",Range={1,10},Increment=1,Suffix="s",CurrentValue=Config.Timings.MutationScanInterval,Flag="MutationScanInterval",Callback=function(v) Config.Timings.MutationScanInterval = v end})
 
+    -------------------------------------------------------
+    -- WEATHER
+    -------------------------------------------------------
     local WeatherTab = Window:CreateTab("Weather", nil)
-    WeatherTab:CreateToggle({Name="Weather Bot",CurrentValue=false,Flag="WeatherBot",Callback=function(v) if v then startModule("WeatherBot") else stopModule("WeatherBot") end end})
+    WeatherTab:CreateSection("Weather Bot")
+    WeatherTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="WeatherBot",Callback=function(v) if v then startModule("WeatherBot") else stopModule("WeatherBot") end end})
+    WeatherTab:CreateSlider({Name="Poll Interval",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.WeatherPollInterval,Flag="WeatherPollInterval",Callback=function(v) Config.Timings.WeatherPollInterval = v end})
 
+    -------------------------------------------------------
+    -- STEAL
+    -------------------------------------------------------
     local StealTab = Window:CreateTab("Steal", nil)
-    StealTab:CreateToggle({Name="Steal Bot (Night)",CurrentValue=false,Flag="StealBot",Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
+    StealTab:CreateSection("Steal Bot (Night Only)")
+    StealTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="StealBot",Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
+    StealTab:CreateSlider({Name="Steal Interval",Range={0.5,5},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.StealInterval,Flag="StealInterval",Callback=function(v) Config.Timings.StealInterval = v end})
+    StealTab:CreateSlider({Name="Max Attempts/Night",Range={5,50},Increment=5,Suffix="",CurrentValue=Config.Steal.MaxAttemptsPerNight,Flag="MaxStealAttempts",Callback=function(v) Config.Steal.MaxAttemptsPerNight = v end})
+    StealTab:CreateSlider({Name="Min Fruit Value",Range={0,10000},Increment=100,Suffix=" $",CurrentValue=Config.Steal.MinFruitValue,Flag="MinFruitValue",Callback=function(v) Config.Steal.MinFruitValue = v end})
 
+    -------------------------------------------------------
+    -- INVENTORY
+    -------------------------------------------------------
     local InvTab = Window:CreateTab("Inventory", nil)
-    InvTab:CreateToggle({Name="Inventory Optimizer",CurrentValue=false,Flag="InventoryOptimizer",Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
+    InvTab:CreateSection("Inventory Optimizer")
+    InvTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="InventoryOptimizer",Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
+    InvTab:CreateSlider({Name="Check Interval",Range={5,60},Increment=5,Suffix="s",CurrentValue=Config.Timings.InventoryCheckInterval,Flag="InventoryCheckInterval",Callback=function(v) Config.Timings.InventoryCheckInterval = v end})
 
+    -------------------------------------------------------
+    -- STATUS
+    -------------------------------------------------------
     local StatusTab = Window:CreateTab("Status", nil)
-    StatusTab:CreateButton({Name="Refresh",Callback=function() Rayfield:Notify({Title="GAG Hub",Content=getFullStatus(),Duration=10}) end})
+    StatusTab:CreateSection("Controls")
+    StatusTab:CreateButton({Name="Refresh Status",Callback=function() Rayfield:Notify({Title="GAG Hub",Content=getFullStatus(),Duration=10}) end})
     StatusTab:CreateButton({Name="Enable All",Callback=function() for n in pairs(Modules) do startModule(n) end end})
     StatusTab:CreateButton({Name="Disable All",Callback=function() for n in pairs(Modules) do stopModule(n) end end})
 
