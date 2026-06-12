@@ -2545,7 +2545,7 @@ local function createUI()
     StatusTab:CreateButton({Name="Enable All",Callback=function() for n in pairs(Modules) do startModule(n) end end})
     StatusTab:CreateButton({Name="Disable All",Callback=function() for n in pairs(Modules) do stopModule(n) end end})
 
-    Rayfield:LoadConfiguration()
+    pcall(function() Rayfield:LoadConfiguration() end)
     return true
 end
 
