@@ -25,11 +25,7 @@ local Config = {
         StealInterval = 1.5, InventoryCheckInterval = 10,
     },
     Restock = {
-        TargetSeeds = {
-            "Grape", "Mango", "Dragon Fruit", "Mushroom", "Coconut",
-            "Cherry", "Pomegranate", "Moon Bloom", "Dragon's Breath",
-            "Ghost Pepper", "Sunflower", "Venus Fly Trap", "Lotus", "Romanesco",
-        },
+        TargetSeeds = {},
         MaxSpendPerCycle = 500000,
         BlacklistedSeeds = { "Carrot", "Strawberry", "Tomato" },
     },
