@@ -762,10 +762,77 @@ Modules.AutoHarvest = {}
 do
     local M = Modules.AutoHarvest
     local Harvest = M
+    local Players = game:GetService("Players")
     Harvest._running = false
     Harvest._thread  = nil
     Harvest._connections = {}
     Harvest._stats = { harvested = 0, scans = 0, errors = 0 }
+
+    ---------------------------------------------------------------
+    -- GET MY PLOT (dynamic)
+    ---------------------------------------------------------------
+
+    function Harvest._getMyPlot()
+        local lp = Players.LocalPlayer
+        if not lp then return nil end
+        local plotId = lp:GetAttribute("PlotId")
+        if not plotId then return nil end
+        local gardens = workspace:FindFirstChild("Gardens")
+        if not gardens then return nil end
+        return gardens:FindFirstChild("Plot" .. tostring(plotId))
+    end
+
+    ---------------------------------------------------------------
+    -- FIND HARVEST PROMPTS ON MY PLOT
+    -- Path: Plot.Plants[PlantId].Fruits[FruitId].HarvestPart.HarvestPrompt
+    ---------------------------------------------------------------
+
+    function Harvest._findPrompts(plot)
+        local prompts = {}
+        if not plot then return prompts end
+        local plantsFolder = plot:FindFirstChild("Plants")
+        if not plantsFolder then return prompts end
+        for _, plantModel in ipairs(plantsFolder:GetChildren()) do
+            local fruitsFolder = plantModel:FindFirstChild("Fruits")
+            if fruitsFolder then
+                for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
+                    local harvestPart = fruitModel:FindFirstChild("HarvestPart")
+                    if harvestPart then
+                        local prompt = harvestPart:FindFirstChild("HarvestPrompt")
+                        if prompt and prompt:IsA("ProximityPrompt") and prompt.Enabled then
+                            table.insert(prompts, {
+                                prompt = prompt,
+                                plantId = plantModel.Name,
+                                fruitId = fruitModel.Name,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+        return prompts
+    end
+
+    ---------------------------------------------------------------
+    -- FIRE PROXIMITY PROMPT
+    ---------------------------------------------------------------
+
+    function Harvest._firePrompt(prompt)
+        if not prompt or not prompt:IsA("ProximityPrompt") then return false end
+        if not prompt.Enabled then return false end
+        pcall(function()
+            if prompt.HoldDuration > 0 then
+                prompt:InputHoldBegin()
+                task.wait(prompt.HoldDuration + 0.05)
+                if prompt:IsDescendantOf(workspace) then
+                    prompt:InputHoldEnd()
+                end
+            else
+                prompt:InputHoldEnd()
+            end
+        end)
+        return true
+    end
 
     ---------------------------------------------------------------
     -- START
@@ -790,30 +857,42 @@ do
             table.insert(Harvest._connections, fruitAddedConn)
         end
 
-        -- [METHOD 2] Periodic scan via CollectionService HarvestPrompt tags
+        -- [METHOD 2] Periodic scan — find HarvestPrompt on my plot, fire them
         Harvest._thread = task.spawn(function()
-            local CS = game:GetService("CollectionService")
             while Harvest._running do
-                local prompts = CS:GetTagged("HarvestPrompt")
-                for _, prompt in ipairs(prompts) do
-                    if not Harvest._running then break end
-                    pcall(function()
-                        if prompt:IsA("ProximityPrompt") and prompt.Enabled and prompt.Parent then
-                            local plantModel = prompt.Parent
-                            local plantId = plantModel:GetAttribute("PlantId")
-                            local fruitId = plantModel:GetAttribute("FruitId")
-                            if plantId then
-                                local ok = Net.fire("Garden.CollectFruit", plantId, fruitId or "")
-                                if ok then
-                                    Harvest._stats.harvested += 1
-                                else
-                                    Harvest._stats.errors += 1
+                local plot = Harvest._getMyPlot()
+                if plot then
+                    Harvest._stats.scans += 1
+                    local entries = Harvest._findPrompts(plot)
+                    for _, entry in ipairs(entries) do
+                        if not Harvest._running then break end
+                        local fired = Harvest._firePrompt(entry.prompt)
+                        if fired then
+                            Harvest._stats.harvested += 1
+                            print("[GAG Hub] Harvested:", entry.fruitId, "plant:", entry.plantId)
+                        else
+                            Harvest._stats.errors += 1
+                        end
+                    end
+
+                    -- Fallback: CollectionService tagged prompts scoped to my plot
+                    if #entries == 0 then
+                        pcall(function()
+                            local CS = game:GetService("CollectionService")
+                            for _, prompt in ipairs(CS:GetTagged("HarvestPrompt")) do
+                                if not Harvest._running then break end
+                                if prompt:IsA("ProximityPrompt") and prompt.Enabled and prompt:IsDescendantOf(plot) then
+                                    local fired = Harvest._firePrompt(prompt)
+                                    if fired then
+                                        Harvest._stats.harvested += 1
+                                    else
+                                        Harvest._stats.errors += 1
+                                    end
                                 end
                             end
-                        end
-                    end)
+                        end)
+                    end
                 end
-                Harvest._stats.scans += 1
                 task.wait(interval)
             end
         end)
