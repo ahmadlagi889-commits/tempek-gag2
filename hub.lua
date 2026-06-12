@@ -814,6 +814,8 @@ do
         local count = 0
         local plantsFolder = plot:FindFirstChild("Plants")
         if not plantsFolder then return 0 end
+
+        local toCollect = {}
         for _, plantModel in ipairs(plantsFolder:GetChildren()) do
             if not Harvest._running then break end
             local plantId = plantModel:GetAttribute("PlantId")
@@ -823,24 +825,29 @@ do
             local fruitsFolder = plantModel:FindFirstChild("Fruits")
             if fruitsFolder then
                 for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
-                    if not Harvest._running then break end
                     if not Harvest._isHarvestable(fruitModel) then continue end
                     local fruitId = fruitModel:GetAttribute("FruitId")
-                    pcall(function()
-                        Net.fire("Garden.CollectFruit", plantId, fruitId or "")
-                    end)
-                    count += 1
+                    table.insert(toCollect, { plantId = plantId, fruitId = fruitId or "" })
                 end
             end
 
             -- Path B: Single-harvest (HarvestPrompt directly on plant)
             if Harvest._isHarvestable(plantModel) then
-                pcall(function()
-                    Net.fire("Garden.CollectFruit", plantId, "")
-                end)
-                count += 1
+                table.insert(toCollect, { plantId = plantId, fruitId = "" })
             end
         end
+
+        -- Batch fire all at once
+        for _, item in ipairs(toCollect) do
+            if not Harvest._running then break end
+            task.spawn(function()
+                pcall(function()
+                    Net.fire("Garden.CollectFruit", item.plantId, item.fruitId)
+                end)
+            end)
+            count += 1
+        end
+
         return count
     end
 
@@ -858,9 +865,10 @@ do
         local fruitAddedConn = Net.on("Garden.FruitAdded", function(plantId, fruitId, fruitName, data)
             if not Harvest._running then return end
             if not Harvest._isAlive() then return end
-            task.wait(0.15)
-            pcall(function()
-                Net.fire("Garden.CollectFruit", plantId, fruitId or "")
+            task.spawn(function()
+                pcall(function()
+                    Net.fire("Garden.CollectFruit", plantId, fruitId or "")
+                end)
             end)
             Harvest._stats.harvested += 1
         end)
