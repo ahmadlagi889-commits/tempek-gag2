@@ -32,7 +32,7 @@ local Config = {
     },
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
-    Plant = { OnlyEmptyPlots = true, PreferSeed = nil },
+    Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3 },
     Water = { WaterAll = false },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
@@ -1287,11 +1287,12 @@ function Plant._getMyPlot()
 end
 
 ---------------------------------------------------------------
--- CHECK IF PLANT SPOT IS EMPTY
--- Raycast with Plants folder to check for nearby existing plants
+-- CHECK IF POSITION IS EMPTY (no existing plant within range)
+-- Returns true if position is clear
 ---------------------------------------------------------------
 
-function Plant._isSpotEmpty(spotPos, myPlot)
+function Plant._isPosEmpty(pos, myPlot, minDist)
+    minDist = minDist or 2.5 -- minimum spacing between plants
     local plantsFolder = myPlot:FindFirstChild("Plants")
     if not plantsFolder then return true end
     for _, plantModel in ipairs(plantsFolder:GetChildren()) do
@@ -1299,9 +1300,9 @@ function Plant._isSpotEmpty(spotPos, myPlot)
         if plantId then
             local root = plantModel.PrimaryPart or plantModel:FindFirstChildWhichIsA("BasePart")
             if root then
-                local dist = (Vector2.new(root.Position.X, root.Position.Z) - Vector2.new(spotPos.X, spotPos.Z)).Magnitude
-                if dist < 1 then
-                    return false -- too close to existing plant
+                local dist = (Vector2.new(root.Position.X, root.Position.Z) - Vector2.new(pos.X, pos.Z)).Magnitude
+                if dist < minDist then
+                    return false
                 end
             end
         end
@@ -1310,21 +1311,102 @@ function Plant._isSpotEmpty(spotPos, myPlot)
 end
 
 ---------------------------------------------------------------
--- FIND EMPTY PLANT SPOTS
--- Use CollectionService:GetTagged("PlantArea") — same as decompiled
--- Filter to player's plot, check no existing plant nearby
+-- GENERATE GRID POSITIONS FROM A PLANTAREA PART
+-- Covers the entire part surface with evenly spaced points
+-- spacing: studs between each grid point (default 3)
 ---------------------------------------------------------------
 
-function Plant._findEmptySpots(myPlot)
-    local spots = {}
+function Plant._generateGridFromPart(part, spacing)
+    spacing = spacing or 3
+    local positions = {}
+    local size = part.Size
+    local cf = part.CFrame
+
+    -- Calculate grid steps in local X and Z axes
+    local halfX = size.X / 2
+    local halfZ = size.Z / 2
+    local stepsX = math.max(1, math.floor(size.X / spacing))
+    local stepsZ = math.max(1, math.floor(size.Z / spacing))
+
+    -- Generate evenly spaced points across the part surface
+    for ix = 0, stepsX do
+        for iz = 0, stepsZ do
+            -- Map to local coordinates: -halfX to +halfX
+            local localX = -halfX + (ix / stepsX) * size.X
+            local localZ = -halfZ + (iz / stepsZ) * size.Z
+            -- Transform to world position (use top surface Y)
+            local worldPos = cf * Vector3.new(localX, size.Y / 2, localZ)
+            table.insert(positions, worldPos)
+        end
+    end
+    return positions
+end
+
+---------------------------------------------------------------
+-- FIND ALL EMPTY PLANT POSITIONS
+-- 1. Get all PlantArea parts in my plot
+-- 2. Generate grid across each part's surface
+-- 3. Filter out positions too close to existing plants
+-- Returns sorted list of empty world positions
+---------------------------------------------------------------
+
+function Plant._findEmptySpots(myPlot, spacing)
+    spacing = spacing or 3
+
+    -- Collect all PlantArea parts belonging to my plot
+    local plantAreaParts = {}
     for _, part in ipairs(CollectionService:GetTagged("PlantArea")) do
         if part:IsA("BasePart") and part:IsDescendantOf(myPlot) then
-            if Plant._isSpotEmpty(part.Position, myPlot) then
-                table.insert(spots, part)
+            table.insert(plantAreaParts, part)
+        end
+    end
+
+    -- Also check for PlantArea tagged via attribute (some plots use this)
+    for _, desc in ipairs(myPlot:GetDescendants()) do
+        if desc:IsA("BasePart") and desc:GetAttribute("PlantArea") then
+            if not table.find(plantAreaParts, desc) then
+                table.insert(plantAreaParts, desc)
             end
         end
     end
-    return spots
+
+    if #plantAreaParts == 0 then
+        -- Fallback: use GardenTotalArea if no PlantArea found
+        for _, part in ipairs(CollectionService:GetTagged("GardenTotalArea")) do
+            if part:IsA("BasePart") and part:IsDescendantOf(myPlot) then
+                table.insert(plantAreaParts, part)
+            end
+        end
+    end
+
+    -- Generate grid positions across all parts
+    local allPositions = {}
+    for _, part in ipairs(plantAreaParts) do
+        local grid = Plant._generateGridFromPart(part, spacing)
+        for _, pos in ipairs(grid) do
+            table.insert(allPositions, pos)
+        end
+    end
+
+    -- Filter: only keep empty positions
+    local emptySpots = {}
+    for _, pos in ipairs(allPositions) do
+        if Plant._isPosEmpty(pos, myPlot) then
+            table.insert(emptySpots, pos)
+        end
+    end
+
+    -- Sort by distance from plot center for consistent planting order
+    local plotCenter = myPlot.PrimaryPart and myPlot.PrimaryPart.Position
+        or (myPlot:FindFirstChild("SpawnPoint") and myPlot.SpawnPoint.Position)
+        or Vector3.zero
+    table.sort(emptySpots, function(a, b)
+        local da = (Vector2.new(a.X - plotCenter.X, a.Z - plotCenter.Z)).Magnitude
+        local db = (Vector2.new(b.X - plotCenter.X, b.Z - plotCenter.Z)).Magnitude
+        return da < db
+    end)
+
+    return emptySpots
 end
 
 ---------------------------------------------------------------
@@ -1372,18 +1454,20 @@ function Plant._autoPlant(plantConfig, Net, Utils)
         return
     end
 
-    -- Step 3: Find empty spots via PlantArea tags
-    local spots = Plant._findEmptySpots(myPlot)
+    -- Step 3: Find empty spots — grid scan across all PlantArea parts
+    local spacing = plantConfig.GridSpacing or 3
+    local spots = Plant._findEmptySpots(myPlot, spacing)
     if #spots == 0 then
         Plant._unequipTool()
         return
     end
 
-    -- Step 4: Plant in ALL empty spots (fill the plot)
+    print("[GAG Hub] Found", #spots, "empty spots in plot")
+
+    -- Step 4: Plant in ALL empty spots (fill the entire plot)
     local planted = 0
-    for _, spot in ipairs(spots) do
+    for _, pos in ipairs(spots) do
         if not Plant._running then break end
-        local pos = spot.Position
 
         -- Verify still equipped before each fire
         local curSn, curTool = Plant._getEquippedSeed()
