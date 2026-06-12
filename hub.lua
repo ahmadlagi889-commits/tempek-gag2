@@ -2907,6 +2907,180 @@ local function getFullStatus()
 end
 
 ---------------------------------------------------------------
+-- LIVE STATS TRACKER
+---------------------------------------------------------------
+
+local Stats = {
+    startSheckles = 0,
+    startTime = os.clock(),
+    sessionHarvested = 0,
+    sessionPlanted = 0,
+    sessionSold = 0,
+    sessionBought = 0,
+}
+
+-- Capture initial state on load
+function Stats.init()
+    Stats.startSheckles = Utils.getSheckles()
+    Stats.startTime = os.clock()
+end
+
+-- Get elapsed time since start
+function Stats.getElapsed()
+    return os.clock() - Stats.startTime
+end
+
+-- Calculate profit/loss since start
+function Stats.getProfit()
+    return Utils.getSheckles() - Stats.startSheckles
+end
+
+-- Count plants in my garden
+function Stats.getPlantCount()
+    local garden = Utils.getMyGarden()
+    if not garden then return 0 end
+    local plants = garden:FindFirstChild("Plants")
+    return plants and #plants:GetChildren() or 0
+end
+
+-- Calculate approximate garden value (all fruits on all plants)
+-- Uses SellValueData * size^2.65 as base estimate
+function Stats.getGardenValue()
+    local garden = Utils.getMyGarden()
+    if not garden then return 0 end
+    local total = 0
+    local plants = garden:FindFirstChild("Plants")
+    if not plants then return 0 end
+    for _, plantModel in ipairs(plants:GetChildren()) do
+        local seedName = plantModel:GetAttribute("SeedName")
+        if not seedName then continue end
+        local fruitsFolder = plantModel:FindFirstChild("Fruits")
+        if fruitsFolder then
+            for _, fruitModel in ipairs(fruitsFolder:GetChildren()) do
+                local size = fruitModel:GetAttribute("SizeMultiplier") or 1
+                local mutation = fruitModel:GetAttribute("Mutation")
+                local baseVal = Stats._sellData[seedName] or 0
+                local sizeMult = size ^ 2.65
+                local mutMult = 1
+                if mutation and Stats._mutData and Stats._mutData[mutation] then
+                    mutMult = Stats._mutData[mutation].PriceMultiplier or 1
+                end
+                total += math.floor(baseVal * sizeMult * mutMult)
+            end
+        else
+            -- Single-harvest: plant itself has value
+            local size = plantModel:GetAttribute("SizeMultiplier") or 1
+            local baseVal = Stats._sellData[seedName] or 0
+            total += math.floor(baseVal * (size ^ 2.65))
+        end
+    end
+    return total
+end
+
+-- Count backpack items and estimate seed value
+function Stats.getBackpackInfo()
+    local lp = Players and Players.LocalPlayer
+    local bp = lp and lp:FindFirstChild("Backpack")
+    if not bp then return 0, 0, 0 end
+    local totalItems = 0
+    local seedCount = 0
+    local fruitCount = 0
+    for _, tool in ipairs(bp:GetChildren()) do
+        if tool:IsA("Tool") then
+            totalItems += 1
+            if tool:GetAttribute("SeedTool") then
+                seedCount += 1
+            elseif tool:GetAttribute("FruitName") or tool:GetAttribute("IsFruit") then
+                fruitCount += 1
+            end
+        end
+    end
+    return totalItems, seedCount, fruitCount
+end
+
+-- Count active modules
+function Stats.getActiveModules()
+    local count = 0
+    local names = {}
+    for name, active in pairs(Running) do
+        if active then
+            count += 1
+            table.insert(names, name)
+        end
+    end
+    return count, names
+end
+
+-- Build full live stats text for Status tab
+function Stats.buildText()
+    local sheckles = Utils.getSheckles()
+    local profit = Stats.getProfit()
+    local elapsed = Stats.getElapsed()
+    local gardenVal = Stats.getGardenValue()
+    local plantCount = Stats.getPlantCount()
+    local totalItems, seedCount, fruitCount = Stats.getBackpackInfo()
+    local activeCount, activeNames = Stats.getActiveModules()
+
+    local profitSign = profit >= 0 and "+" or ""
+    local profitColor = profit >= 0 and "🟢" or "🔴"
+
+    local lines = {}
+
+    -- Money section
+    table.insert(lines, "💰 **Money**")
+    table.insert(lines, string.format("  Current: %s", Utils.formatNumber(sheckles)))
+    table.insert(lines, string.format("  Start:   %s", Utils.formatNumber(Stats.startSheckles)))
+    table.insert(lines, string.format("  Profit:  %s%s%s", profitColor, profitSign, Utils.formatNumber(profit)))
+    table.insert(lines, "")
+
+    -- Session
+    table.insert(lines, "⏱ **Session**")
+    table.insert(lines, string.format("  Runtime: %s", Utils.formatTime(elapsed)))
+    table.insert(lines, "")
+
+    -- Garden
+    table.insert(lines, "🌱 **Garden**")
+    table.insert(lines, string.format("  Plants: %d", plantCount))
+    table.insert(lines, string.format("  Value:  %s", Utils.formatNumber(gardenVal)))
+    table.insert(lines, "")
+
+    -- Backpack
+    table.insert(lines, "🎒 **Backpack**")
+    table.insert(lines, string.format("  Items: %d  (Seeds: %d, Fruits: %d)", totalItems, seedCount, fruitCount))
+    table.insert(lines, "")
+
+    -- Module stats
+    table.insert(lines, string.format("⚡ **Modules** (%d active)", activeCount))
+    for name, mod in pairs(Modules) do
+        local st = Running[name] and "✅" or "⬜"
+        local stats = mod.getStats and mod.getStats() or {}
+        local parts = {}
+        for k, v in pairs(stats) do
+            parts[#parts+1] = k .. "=" .. tostring(v)
+        end
+        table.insert(lines, string.format("  %s %s: %s", st, name, table.concat(parts, " | ")))
+    end
+
+    return table.concat(lines, "\n")
+end
+
+-- SellValueData cache (loaded lazily)
+Stats._sellData = {}
+Stats._mutData = {}
+task.spawn(function()
+    pcall(function()
+        local RS = game:GetService("ReplicatedStorage")
+        local shared = RS:WaitForChild("SharedModules", 10)
+        if shared then
+            local svd = shared:WaitForChild("SellValueData", 5)
+            if svd then Stats._sellData = require(svd) end
+            local md = shared:WaitForChild("MutationData", 5)
+            if md then Stats._mutData = require(md) end
+        end
+    end)
+end)
+
+---------------------------------------------------------------
 -- RAYFIELD UI
 ---------------------------------------------------------------
 
@@ -2929,6 +3103,9 @@ local function createUI()
         Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
     end)
     if not ok or not Rayfield then warn("[GAG Hub] Rayfield failed") return false end
+
+    -- Init live stats tracker (capture starting money)
+    Stats.init()
 
     local Window = Rayfield:CreateWindow({
         Name = "🌿 " .. Config.UI.Title,
@@ -3007,14 +3184,36 @@ local function createUI()
     EventTab:CreateSlider({Name="Min Value", Range={0,10000}, Increment=100, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
 
     -------------------------------------------------------
-    -- TAB 4: STATUS & CONTROLS
+    -- TAB 4: LIVE STATUS
     -------------------------------------------------------
     local StatusTab = Window:CreateTab("Status", 6030690) -- activity icon
 
+    StatusTab:CreateSection("📊 Live Stats (auto-refresh)")
+
+    local StatsParagraph = StatusTab:CreateParagraph({
+        Title = "Session Overview",
+        Content = "Loading stats..."
+    })
+
     StatusTab:CreateSection("🎮 Controls")
-    StatusTab:CreateButton({Name="📊 Refresh Status", Callback=function() Rayfield:Notify({Title="GAG Hub",Content=getFullStatus(),Duration=10}) end})
-    StatusTab:CreateButton({Name="✅ Enable All", Callback=function() for n in pairs(Modules) do startModule(n) end end})
-    StatusTab:CreateButton({Name="❌ Disable All", Callback=function() for n in pairs(Modules) do stopModule(n) end end})
+    StatusTab:CreateButton({Name="✅ Enable All", Callback=function()
+        for n in pairs(Modules) do startModule(n) end
+        Rayfield:Notify({Title="GAG Hub",Content="All modules enabled",Duration=3})
+    end})
+    StatusTab:CreateButton({Name="❌ Disable All", Callback=function()
+        for n in pairs(Modules) do stopModule(n) end
+        Rayfield:Notify({Title="GAG Hub",Content="All modules disabled",Duration=3})
+    end})
+
+    -- Live update loop (every 2 seconds)
+    task.spawn(function()
+        while true do
+            pcall(function()
+                StatsParagraph:Set({Title="Session Overview", Content=Stats.buildText()})
+            end)
+            task.wait(2)
+        end
+    end)
 
     pcall(function() Rayfield:LoadConfiguration() end)
     return true
