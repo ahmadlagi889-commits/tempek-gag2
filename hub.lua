@@ -2920,89 +2920,90 @@ local function createUI()
     if not ok or not Rayfield then warn("[GAG Hub] Rayfield failed") return false end
 
     local Window = Rayfield:CreateWindow({
-        Name = Config.UI.Title, LoadingTitle = Config.UI.Subtitle,
+        Name = "🌿 " .. Config.UI.Title,
+        LoadingTitle = Config.UI.Subtitle,
+        LoadingSubtitle = "by GAG Hub",
         ConfigurationSaving = { Enabled = true, FolderName = "GAGHub", FileName = "config" },
         Discord = { Enabled = false }, KeySystem = false,
     })
 
     -------------------------------------------------------
-    -- FARMING
+    -- TAB 1: FARMING (harvest + sell + water + plant)
     -------------------------------------------------------
-    local FarmTab = Window:CreateTab("Farming", nil)
-    FarmTab:CreateSection("Modules")
-    for _, e in ipairs({{"Auto Harvest","AutoHarvest"},{"Auto Sell","AutoSell"},{"Auto Water","AutoWater"},{"Auto Plant","AutoPlant"}}) do
-        FarmTab:CreateToggle({Name=e[1],CurrentValue=false,Flag=e[2],Callback=function(v) if v then startModule(e[2]) else stopModule(e[2]) end end})
+    local FarmTab = Window:CreateTab("Farming", 6034510) -- leaf icon
+
+    FarmTab:CreateSection("⚡ Auto Modules")
+    for _, e in ipairs({
+        {"Auto Harvest",   "AutoHarvest"},
+        {"Auto Sell",      "AutoSell"},
+        {"Auto Water",     "AutoWater"},
+        {"Auto Plant",     "AutoPlant"},
+    }) do
+        FarmTab:CreateToggle({
+            Name = e[1], CurrentValue = false, Flag = e[2],
+            Callback = function(v) if v then startModule(e[2]) else stopModule(e[2]) end end
+        })
     end
-    FarmTab:CreateSection("Intervals")
-    FarmTab:CreateSlider({Name="Harvest",Range={0.5,10},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.HarvestInterval,Flag="HarvestInterval",Callback=function(v) Config.Timings.HarvestInterval = v end})
-    FarmTab:CreateSlider({Name="Sell",Range={1,30},Increment=1,Suffix="s",CurrentValue=Config.Timings.SellInterval,Flag="SellInterval",Callback=function(v) Config.Timings.SellInterval = v end})
-    FarmTab:CreateSlider({Name="Water",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.WaterInterval,Flag="WaterInterval",Callback=function(v) Config.Timings.WaterInterval = v end})
-    FarmTab:CreateSlider({Name="Plant",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.PlantInterval,Flag="PlantInterval",Callback=function(v) Config.Timings.PlantInterval = v end})
+
+    FarmTab:CreateSection("⏱ Intervals")
+    FarmTab:CreateSlider({Name="Harvest", Range={0.5,10}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.HarvestInterval, Flag="HarvestInterval", Callback=function(v) Config.Timings.HarvestInterval=v end})
+    FarmTab:CreateSlider({Name="Sell", Range={1,30}, Increment=1, Suffix="s", CurrentValue=Config.Timings.SellInterval, Flag="SellInterval", Callback=function(v) Config.Timings.SellInterval=v end})
+    FarmTab:CreateSlider({Name="Water", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.WaterInterval, Flag="WaterInterval", Callback=function(v) Config.Timings.WaterInterval=v end})
+    FarmTab:CreateSlider({Name="Plant", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.PlantInterval, Flag="PlantInterval", Callback=function(v) Config.Timings.PlantInterval=v end})
+
+    FarmTab:CreateSection("🌱 Plant Config")
+    FarmTab:CreateSlider({Name="Grid Spacing", Range={2,8}, Increment=0.5, Suffix=" studs", CurrentValue=Config.Plant.GridSpacing, Flag="GridSpacing", Callback=function(v) Config.Plant.GridSpacing=v end})
+    FarmTab:CreateInput({Name="Prefer Seed (empty=any)", PlaceholderText="e.g. Carrot", RemoveTextAfterFocusLost=false, Flag="PreferSeed", Callback=function(v) Config.Plant.PreferSeed = (v~="" and v or nil) end})
 
     -------------------------------------------------------
-    -- SHOP
+    -- TAB 2: SHOP & PETS (restock + inventory + pets)
     -------------------------------------------------------
-    local ShopTab = Window:CreateTab("Shop", nil)
-    ShopTab:CreateSection("Restock Sniper")
-    ShopTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="RestockSniper",Callback=function(v) if v then startModule("RestockSniper") else stopModule("RestockSniper") end end})
-    ShopTab:CreateSlider({Name="Poll Interval",Range={0.5,5},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.RestockPollInterval,Flag="RestockPollInterval",Callback=function(v) Config.Timings.RestockPollInterval = v end})
-    ShopTab:CreateSection("Target Seeds")
-    ShopTab:CreateDropdown({Name="Buy Targets",Options=AllSeeds,CurrentOption=Config.Restock.TargetSeeds,MultipleOptions=true,Flag="RestockTargets",Callback=function(opts) Config.Restock.TargetSeeds = opts end})
-    ShopTab:CreateDropdown({Name="Blacklist",Options=AllSeeds,CurrentOption=Config.Restock.BlacklistedSeeds,MultipleOptions=true,Flag="RestockBlacklist",Callback=function(opts) Config.Restock.BlacklistedSeeds = opts end})
+    local ShopTab = Window:CreateTab("Shop", 6031790) -- shopping-cart icon
+
+    ShopTab:CreateSection("🎯 Restock Sniper")
+    ShopTab:CreateToggle({Name="Enabled", CurrentValue=false, Flag="RestockSniper", Callback=function(v) if v then startModule("RestockSniper") else stopModule("RestockSniper") end end})
+    ShopTab:CreateSlider({Name="Poll", Range={0.5,5}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.RestockPollInterval, Flag="RestockPollInterval", Callback=function(v) Config.Timings.RestockPollInterval=v end})
+    ShopTab:CreateDropdown({Name="Buy Targets", Options=AllSeeds, CurrentOption=Config.Restock.TargetSeeds, MultipleOptions=true, Flag="RestockTargets", Callback=function(opts) Config.Restock.TargetSeeds=opts end})
+    ShopTab:CreateDropdown({Name="Blacklist", Options=AllSeeds, CurrentOption=Config.Restock.BlacklistedSeeds, MultipleOptions=true, Flag="RestockBlacklist", Callback=function(opts) Config.Restock.BlacklistedSeeds=opts end})
+
+    ShopTab:CreateSection("📦 Inventory")
+    ShopTab:CreateToggle({Name="Optimizer", CurrentValue=false, Flag="InventoryOptimizer", Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
+    ShopTab:CreateSlider({Name="Check", Range={5,60}, Increment=5, Suffix="s", CurrentValue=Config.Timings.InventoryCheckInterval, Flag="InventoryCheckInterval", Callback=function(v) Config.Timings.InventoryCheckInterval=v end})
+
+    ShopTab:CreateSection("🐾 Pets")
+    ShopTab:CreateToggle({Name="Auto Hatch", CurrentValue=false, Flag="AutoBuyPet", Callback=function(v) if v then startModule("AutoBuyPet") else stopModule("AutoBuyPet") end end})
+    ShopTab:CreateSlider({Name="Hatch", Range={1,10}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.PetHatchInterval, Flag="PetHatchInterval", Callback=function(v) Config.Timings.PetHatchInterval=v end})
+    ShopTab:CreateDropdown({Name="Min Rarity", Options={"Common","Uncommon","Rare","Legendary","Mythic","Super"}, CurrentOption={Config.Pet.MinRarity}, MultipleOptions=false, Flag="PetMinRarity", Callback=function(opt) Config.Pet.MinRarity=type(opt)=="table" and opt[1] or opt end})
+    ShopTab:CreateToggle({Name="Sell Unwanted", CurrentValue=Config.Pet.AutoSellUnwanted, Flag="PetAutoSell", Callback=function(v) Config.Pet.AutoSellUnwanted=v end})
 
     -------------------------------------------------------
-    -- MUTATIONS
+    -- TAB 3: EVENTS (mutations + weather + steal)
     -------------------------------------------------------
-    local MutTab = Window:CreateTab("Mutations", nil)
-    MutTab:CreateSection("Mutation Tracker")
-    MutTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="MutationTracker",Callback=function(v) if v then startModule("MutationTracker") else stopModule("MutationTracker") end end})
-    MutTab:CreateSlider({Name="Scan Interval",Range={1,10},Increment=1,Suffix="s",CurrentValue=Config.Timings.MutationScanInterval,Flag="MutationScanInterval",Callback=function(v) Config.Timings.MutationScanInterval = v end})
+    local EventTab = Window:CreateTab("Events", 6035974) -- zap icon
+
+    EventTab:CreateSection("🧬 Mutations")
+    EventTab:CreateToggle({Name="Tracker", CurrentValue=false, Flag="MutationTracker", Callback=function(v) if v then startModule("MutationTracker") else stopModule("MutationTracker") end end})
+    EventTab:CreateSlider({Name="Scan", Range={1,10}, Increment=1, Suffix="s", CurrentValue=Config.Timings.MutationScanInterval, Flag="MutationScanInterval", Callback=function(v) Config.Timings.MutationScanInterval=v end})
+
+    EventTab:CreateSection("🌧 Weather")
+    EventTab:CreateToggle({Name="Weather Bot", CurrentValue=false, Flag="WeatherBot", Callback=function(v) if v then startModule("WeatherBot") else stopModule("WeatherBot") end end})
+    EventTab:CreateSlider({Name="Poll", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.WeatherPollInterval, Flag="WeatherPollInterval", Callback=function(v) Config.Timings.WeatherPollInterval=v end})
+
+    EventTab:CreateSection("🌙 Steal Bot")
+    EventTab:CreateToggle({Name="Enabled (Night)", CurrentValue=false, Flag="StealBot", Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
+    EventTab:CreateSlider({Name="Interval", Range={0.5,5}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.StealInterval, Flag="StealInterval", Callback=function(v) Config.Timings.StealInterval=v end})
+    EventTab:CreateSlider({Name="Max/Night", Range={5,50}, Increment=5, Suffix="", CurrentValue=Config.Steal.MaxAttemptsPerNight, Flag="MaxStealAttempts", Callback=function(v) Config.Steal.MaxAttemptsPerNight=v end})
+    EventTab:CreateSlider({Name="Min Value", Range={0,10000}, Increment=100, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
 
     -------------------------------------------------------
-    -- WEATHER
+    -- TAB 4: STATUS & CONTROLS
     -------------------------------------------------------
-    local WeatherTab = Window:CreateTab("Weather", nil)
-    WeatherTab:CreateSection("Weather Bot")
-    WeatherTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="WeatherBot",Callback=function(v) if v then startModule("WeatherBot") else stopModule("WeatherBot") end end})
-    WeatherTab:CreateSlider({Name="Poll Interval",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.WeatherPollInterval,Flag="WeatherPollInterval",Callback=function(v) Config.Timings.WeatherPollInterval = v end})
+    local StatusTab = Window:CreateTab("Status", 6030690) -- activity icon
 
-    -------------------------------------------------------
-    -- STEAL
-    -------------------------------------------------------
-    local StealTab = Window:CreateTab("Steal", nil)
-    StealTab:CreateSection("Steal Bot (Night Only)")
-    StealTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="StealBot",Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
-    StealTab:CreateSlider({Name="Steal Interval",Range={0.5,5},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.StealInterval,Flag="StealInterval",Callback=function(v) Config.Timings.StealInterval = v end})
-    StealTab:CreateSlider({Name="Max Attempts/Night",Range={5,50},Increment=5,Suffix="",CurrentValue=Config.Steal.MaxAttemptsPerNight,Flag="MaxStealAttempts",Callback=function(v) Config.Steal.MaxAttemptsPerNight = v end})
-    StealTab:CreateSlider({Name="Min Fruit Value",Range={0,10000},Increment=100,Suffix=" $",CurrentValue=Config.Steal.MinFruitValue,Flag="MinFruitValue",Callback=function(v) Config.Steal.MinFruitValue = v end})
-
-    -------------------------------------------------------
-    -- INVENTORY
-    -------------------------------------------------------
-    local InvTab = Window:CreateTab("Inventory", nil)
-    InvTab:CreateSection("Inventory Optimizer")
-    InvTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="InventoryOptimizer",Callback=function(v) if v then startModule("InventoryOptimizer") else stopModule("InventoryOptimizer") end end})
-    InvTab:CreateSlider({Name="Check Interval",Range={5,60},Increment=5,Suffix="s",CurrentValue=Config.Timings.InventoryCheckInterval,Flag="InventoryCheckInterval",Callback=function(v) Config.Timings.InventoryCheckInterval = v end})
-
-    -------------------------------------------------------
-    -- PETS (Auto Egg Hatch + Rarity Filter)
-    -------------------------------------------------------
-    local PetTab = Window:CreateTab("Pets", nil)
-    PetTab:CreateSection("Auto Egg Hatch")
-    PetTab:CreateToggle({Name="Enabled",CurrentValue=false,Flag="AutoBuyPet",Callback=function(v) if v then startModule("AutoBuyPet") else stopModule("AutoBuyPet") end end})
-    PetTab:CreateSlider({Name="Hatch Interval",Range={1,10},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.PetHatchInterval,Flag="PetHatchInterval",Callback=function(v) Config.Timings.PetHatchInterval = v end})
-    PetTab:CreateSection("Rarity Filter")
-    PetTab:CreateDropdown({Name="Min Rarity",Options={"Common","Uncommon","Rare","Legendary","Mythic","Super"},CurrentOption={Config.Pet.MinRarity},MultipleOptions=false,Flag="PetMinRarity",Callback=function(opt) Config.Pet.MinRarity = type(opt)=="table" and opt[1] or opt end})
-    PetTab:CreateToggle({Name="Auto Sell Unwanted",CurrentValue=Config.Pet.AutoSellUnwanted,Flag="PetAutoSell",Callback=function(v) Config.Pet.AutoSellUnwanted = v end})
-
-    -------------------------------------------------------
-    -- STATUS
-    -------------------------------------------------------
-    local StatusTab = Window:CreateTab("Status", nil)
-    StatusTab:CreateSection("Controls")
-    StatusTab:CreateButton({Name="Refresh Status",Callback=function() Rayfield:Notify({Title="GAG Hub",Content=getFullStatus(),Duration=10}) end})
-    StatusTab:CreateButton({Name="Enable All",Callback=function() for n in pairs(Modules) do startModule(n) end end})
-    StatusTab:CreateButton({Name="Disable All",Callback=function() for n in pairs(Modules) do stopModule(n) end end})
+    StatusTab:CreateSection("🎮 Controls")
+    StatusTab:CreateButton({Name="📊 Refresh Status", Callback=function() Rayfield:Notify({Title="GAG Hub",Content=getFullStatus(),Duration=10}) end})
+    StatusTab:CreateButton({Name="✅ Enable All", Callback=function() for n in pairs(Modules) do startModule(n) end end})
+    StatusTab:CreateButton({Name="❌ Disable All", Callback=function() for n in pairs(Modules) do stopModule(n) end end})
 
     pcall(function() Rayfield:LoadConfiguration() end)
     return true
