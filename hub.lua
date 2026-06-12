@@ -2479,9 +2479,20 @@ local function createUI()
     for _, e in ipairs({{"Auto Harvest","AutoHarvest"},{"Auto Sell","AutoSell"},{"Auto Water","AutoWater"},{"Auto Plant","AutoPlant"}}) do
         FarmTab:CreateToggle({Name=e[1],CurrentValue=false,Flag=e[2],Callback=function(v) if v then startModule(e[2]) else stopModule(e[2]) end end})
     end
+    FarmTab:CreateSection("Intervals")
+    FarmTab:CreateSlider({Name="Harvest Interval",Range={0.5,10},Increment=0.5,Suffix="s",CurrentValue=Config.Timings.HarvestInterval or 2,Flag="HarvestInterval",Callback=function(v) Config.Timings.HarvestInterval = v end})
+    FarmTab:CreateSlider({Name="Sell Interval",Range={1,30},Increment=1,Suffix="s",CurrentValue=Config.Timings.SellInterval or 5,Flag="SellInterval",Callback=function(v) Config.Timings.SellInterval = v end})
+    FarmTab:CreateSlider({Name="Water Interval",Range={1,15},Increment=1,Suffix="s",CurrentValue=Config.Timings.WaterInterval or 3,Flag="WaterInterval",Callback=function(v) Config.Timings.WaterInterval = v end})
 
     local ShopTab = Window:CreateTab("Shop", nil)
     ShopTab:CreateToggle({Name="Restock Sniper",CurrentValue=false,Flag="RestockSniper",Callback=function(v) if v then startModule("RestockSniper") else stopModule("RestockSniper") end end})
+
+    local AllSeeds = {"Carrot","Strawberry","Tomato","Blueberry","Apple","Pinetree","Bamboo","Pumpkin","Cactus","Pineapple","Green Bean","Banana","Grape","Mushroom","Coconut","Mango","Thorn Rose","Dragon Fruit","Acorn","Cherry","Sunflower","Venus Fly Trap","Lotus","Pomegranate","Beanstalk","Poison Apple","Moon Bloom","Dragon's Breath","Poison Ivy","Glow Mushroom","Ghost Pepper","Horned Melon","Corn","Baby Cactus","Tulip","Romanesco"}
+    ShopTab:CreateSection("Target Seeds")
+    ShopTab:CreateDropdown({Name="Buy Targets",Options=AllSeeds,CurrentOption=Config.Restock.TargetSeeds or {},MultipleOptions=true,Flag="RestockTargets",Callback=function(opts) Config.Restock.TargetSeeds = opts end})
+    ShopTab:CreateDropdown({Name="Blacklist",Options=AllSeeds,CurrentOption=Config.Restock.BlacklistedSeeds or {},MultipleOptions=true,Flag="RestockBlacklist",Callback=function(opts) Config.Restock.BlacklistedSeeds = opts end})
+    ShopTab:CreateSection("Settings")
+    ShopTab:CreateSlider({Name="Max Spend/Cycle",Range={10000,5000000},Increment=10000,Suffix=" $",CurrentValue=Config.Restock.MaxSpendPerCycle or 500000,Flag="MaxSpend",Callback=function(v) Config.Restock.MaxSpendPerCycle = v end})
 
     local MutTab = Window:CreateTab("Mutations", nil)
     MutTab:CreateToggle({Name="Mutation Tracker",CurrentValue=false,Flag="MutationTracker",Callback=function(v) if v then startModule("MutationTracker") else stopModule("MutationTracker") end end})
