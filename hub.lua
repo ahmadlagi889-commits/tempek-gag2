@@ -3988,19 +3988,28 @@ do
         if Center._running then return end
         Center._running = true
 
-        -- One-shot: teleport to plot center on load, then stop
+        -- One-shot: teleport to soil center on load, then stop
         task.spawn(function()
             task.wait(1) -- brief wait for character to load
             local hrp = Utils.getHumanoidRootPart()
             local garden = Utils.getMyGarden()
             if hrp and garden then
-                local spawnPoint = garden:FindFirstChild("SpawnPoint")
-                    or garden:FindFirstChildWhichIsA("BasePart")
-                if spawnPoint then
+                -- Find center of PlantArea
+                local CollectionService = game:GetService("CollectionService")
+                local totalPos = Vector3.new(0, 0, 0)
+                local count = 0
+                for _, part in ipairs(CollectionService:GetTagged("PlantArea")) do
+                    if part:IsA("BasePart") and part:IsDescendantOf(garden) then
+                        totalPos = totalPos + part.Position
+                        count = count + 1
+                    end
+                end
+                if count > 0 then
+                    local center = totalPos / count
                     pcall(function()
-                        hrp.CFrame = spawnPoint.CFrame + Vector3.new(0, 3, 0)
+                        hrp.CFrame = CFrame.new(center + Vector3.new(0, 3, 0))
                     end)
-                    print("[GAG Hub] Centered to plot")
+                    print("[GAG Hub] Centered to soil")
                 end
             end
             Center._running = false
