@@ -9,7 +9,13 @@ local CS = game:GetService("CollectionService")
 
 local out = {}
 local function log(s) table.insert(out, s) end
-local function logf(fmt, ...) table.insert(out, string.format(fmt, ...)) end
+local function logf(fmt, ...)
+    local args = {...}
+    for i = 1, select("#", ...) do
+        args[i] = tostring(args[i])
+    end
+    table.insert(out, string.format(fmt, unpack(args)))
+end
 
 log("=== PET CATCH RECON ===")
 logf("Player: %s", LP.Name)
