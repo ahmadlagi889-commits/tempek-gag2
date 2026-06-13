@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "b00e515"
+local VERSION = "b00e516"
 
 local Config = {
     Features = {
@@ -2502,25 +2502,30 @@ do
         if not myPlotId then return end
 
         local entries = Steal._findStealablePrompts(myPlotId)
+        if #entries == 0 then return end
+
+        -- Sort by value descending (high value first)
+        local minValue = stealConfig.MinFruitValue or 0
+        table.sort(entries, function(a, b)
+            return (Steal._estimateValue(a.plantId) or 0) > (Steal._estimateValue(b.plantId) or 0)
+        end)
+
         for _, entry in ipairs(entries) do
             if not Steal._running then break end
             if Steal._stats.attempts >= maxAttempts then break end
 
             -- Value filter
-            if stealConfig.MinFruitValue and stealConfig.MinFruitValue > 0 then
-                local sellValue = Steal._estimateValue(entry.plantId)
-                if sellValue < stealConfig.MinFruitValue then
-                    Steal._stats.skipped += 1
-                    continue
-                end
+            local sellValue = Steal._estimateValue(entry.plantId)
+            if minValue > 0 and sellValue < minValue then
+                Steal._stats.skipped += 1
+                continue
             end
 
-            -- Attempt steal with full guard sequence
+            -- Teleport to fruit → fire prompt → teleport back
             local success = Steal._attemptSteal(entry, Net, Utils)
             if success then
                 Steal._stats.stolen += 1
-                print("[GAG Hub] Stolen from", entry.gardenName, "plant:", entry.plantId)
-                Steal._returnFruit(Net, Utils)
+                print("[GAG Hub] Stolen from", entry.gardenName, "plant:", entry.plantId, "value:", sellValue)
                 return
             end
 
@@ -2529,74 +2534,89 @@ do
     end
 
     ---------------------------------------------------------------
-    -- ATTEMPT STEAL (matching decompiled flow)
-    -- 1. Set Collected attr (anti-spam)
-    -- 2. Simulate hold: InputHoldBegin → delay → InputHoldEnd
-    -- 3. Fire BeginSteal(userId, plantId, fruitId)
+    -- ATTEMPT STEAL (teleport flow)
+    -- 1. Get HRP + save old CFrame
+    -- 2. Teleport to fruit position (near prompt)
+    -- 3. Fire proximity prompt (HoldDuration=0)
     -- 4. Wait for CarryingStolenFruit
-    -- 5. Fire CompleteSteal()
-    -- 6. Clear Collected attr
+    -- 5. Teleport back to own plot
     ---------------------------------------------------------------
 
     function Steal._attemptSteal(entry, Net, Utils)
         local prompt = entry.prompt
-        if not prompt or not prompt.Parent then
-            return false
-        end
-        if not prompt.Enabled then
-            return false
-        end
-        if prompt:GetAttribute("Collected") then
-            return false
-        end
+        if not prompt or not prompt.Parent then return false end
+        if not prompt.Enabled then return false end
+        if prompt:GetAttribute("Collected") then return false end
 
         Steal._stats.attempts += 1
 
-        -- Step 1: Anti-spam lock
-        pcall(function() prompt:SetAttribute("Collected", true) end)
+        local hrp = Utils.getHumanoidRootPart()
+        if not hrp then return false end
 
-        -- Step 2: Simulate hold (matching u10 function)
-        local holdDuration = math.max(0.09, prompt.HoldDuration + 0.1)
+        -- Save position
+        local savedCFrame = hrp.CFrame
+
+        -- Get fruit position (parent of prompt)
+        local fruitPart = prompt.Parent
+        if not fruitPart or not fruitPart:IsA("BasePart") then
+            -- Try finding a BasePart in the fruit model
+            fruitPart = prompt.Parent and prompt.Parent:FindFirstChildWhichIsA("BasePart")
+        end
+        if not fruitPart then return false end
+
+        -- Step 1: Teleport to fruit
         pcall(function()
-            prompt:InputHoldBegin()
+            hrp.CFrame = fruitPart.CFrame + Vector3.new(0, 3, 0)
         end)
-        task.wait(holdDuration)
+        task.wait(0.8) -- wait for server to register position
+
+        -- Step 2: Fire proximity prompt
+        local triggered = false
         pcall(function()
-            if prompt and prompt:IsDescendantOf(workspace) then
-                prompt:InputHoldEnd()
+            if fireproximityprompt then
+                fireproximityprompt(prompt)
+                triggered = true
+            else
+                -- Fallback: InputHoldBegin/End
+                prompt:InputHoldBegin()
+                task.wait(math.max(0.09, prompt.HoldDuration + 0.1))
+                if prompt and prompt:IsDescendantOf(workspace) then
+                    prompt:InputHoldEnd()
+                end
+                triggered = true
             end
         end)
 
-        -- Step 3: Fire steal remotes
-        local fired = pcall(function()
-            Net.fire("Steal.BeginSteal", entry.userId, entry.plantId, entry.fruitId)
-        end)
-        if not fired then
-            pcall(function() prompt:SetAttribute("Collected", nil) end)
-            Steal._stats.errors += 1
+        if not triggered then
+            -- Restore position on failure
+            pcall(function() hrp.CFrame = savedCFrame end)
             return false
         end
 
-        -- Step 4: Wait for server to confirm + carrying check
+        -- Step 3: Wait for server to confirm carrying
         task.wait(0.5)
-        local LP = Players.LocalPlayer
-        local nowCarrying = LP:GetAttribute("CarryingStolenFruit")
+        local carrying = Players.LocalPlayer:GetAttribute("CarryingStolenFruit")
 
-        -- Step 5: Complete steal if carrying
-        if nowCarrying then
-            pcall(function() Net.fire("Steal.CompleteSteal") end)
+        -- Step 4: Teleport back to own plot (base)
+        local garden = Utils.getMyGarden()
+        if garden then
+            local spawnPoint = garden:FindFirstChild("SpawnPoint") or garden:FindFirstChildWhichIsA("BasePart")
+            if spawnPoint then
+                pcall(function()
+                    hrp.CFrame = spawnPoint.CFrame + Vector3.new(0, 3, 0)
+                end)
+            end
+        else
+            -- Fallback: restore old position
+            pcall(function() hrp.CFrame = savedCFrame end)
         end
 
-        -- Step 6: Clear Collected lock after safe delay
-        task.delay(holdDuration + 0.5, function()
-            pcall(function()
-                if prompt and prompt:IsDescendantOf(workspace) then
-                    prompt:SetAttribute("Collected", nil)
-                end
-            end)
-        end)
+        if carrying then
+            Steal._stats.returned += 1
+            print("[GAG Hub] Stolen + returned to base")
+        end
 
-        return nowCarrying and true or false
+        return carrying and true or false
     end
 
     ---------------------------------------------------------------
