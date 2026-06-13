@@ -3692,7 +3692,7 @@ do
         pcall(function()
             root.CFrame = rootPart.CFrame * CFrame.new(0, 5, 0)
         end)
-        task.wait(0.5)
+        task.wait(0.8)
 
         -- Find nearest ProximityPrompt to player after teleport
         local nearestPrompt = nil
