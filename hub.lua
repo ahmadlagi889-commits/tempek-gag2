@@ -20,13 +20,14 @@ local Config = {
         AutoPlant = false, RestockSniper = false, MutationTracker = false,
         WeatherBot = false, StealBot = false, InventoryOptimizer = false,
         AutoBuyPet = false, AntiAfk = true, SeedPackClaimer = false,
-        AutoJoinServer = false, AutoPetCatch = false,
+        AutoJoinServer = false, AutoPetCatch = false, AutoCenterPlot = false,
     },
     Timings = {
         HarvestInterval = 0.5, SellInterval = 5, WaterInterval = 3,
         PlantInterval = 5, RestockPollInterval = 1, MutationScanInterval = 3,
         WeatherPollInterval = 5, StealInterval = 1.5, InventoryCheckInterval = 10,
         PetHatchInterval = 2, SeedPackPollInterval = 2, PetCatchInterval = 3,
+        CenterPlotInterval = 5,
     },
     Restock = {
         TargetSeeds = {},
@@ -3969,6 +3970,56 @@ do
         return M._stats
     end
 end
+
+---------------------------------------------------------------
+-- MODULE: AUTO CENTER PLOT
+-- Periodically teleport player to center of their garden plot
+---------------------------------------------------------------
+
+Modules.AutoCenterPlot = {}
+do
+    local M = Modules.AutoCenterPlot
+    local Center = M
+    Center._running = false
+    Center._thread = nil
+    Center._connections = {}
+
+    function Center.start(config, Net, Utils)
+        if Center._running then return end
+        Center._running = true
+
+        local interval = config.Timings.CenterPlotInterval or 5
+
+        Center._thread = task.spawn(function()
+            while Center._running do
+                local hrp = Utils.getHumanoidRootPart()
+                local garden = Utils.getMyGarden()
+                if hrp and garden then
+                    local spawnPoint = garden:FindFirstChild("SpawnPoint")
+                        or garden:FindFirstChildWhichIsA("BasePart")
+                    if spawnPoint then
+                        pcall(function()
+                            hrp.CFrame = spawnPoint.CFrame + Vector3.new(0, 3, 0)
+                        end)
+                    end
+                end
+                task.wait(interval)
+            end
+        end)
+
+        print("[GAG Hub] Auto Center Plot started")
+    end
+
+    function Center.stop()
+        Center._running = false
+        for _, conn in ipairs(Center._connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        Center._connections = {}
+    end
+end
+
+---------------------------------------------------------------
 -- STATUS
 ---------------------------------------------------------------
 
@@ -4317,8 +4368,12 @@ local function createUI()
     EventTab:CreateSection("🌙 Steal Bot")
     EventTab:CreateToggle({Name="Enabled (Night)", CurrentValue=false, Flag="StealBot", Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
     EventTab:CreateSlider({Name="Interval", Range={0.5,5}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.StealInterval, Flag="StealInterval", Callback=function(v) Config.Timings.StealInterval=v end})
-    EventTab:CreateSlider({Name="Max/Night", Range={5,50}, Increment=5, Suffix="", CurrentValue=Config.Steal.MaxAttemptsPerNight, Flag="MaxStealAttempts", Callback=function(v) Config.Steal.MaxAttemptsPerNight=v end})
+    EventTab:CreateSlider({Name="Max/Night", Range={5,100}, Increment=5, Suffix="", CurrentValue=Config.Steal.MaxAttemptsPerNight, Flag="MaxStealAttempts", Callback=function(v) Config.Steal.MaxAttemptsPerNight=v end})
     EventTab:CreateSlider({Name="Min Value", Range={100,10000}, Increment=100, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
+
+    EventTab:CreateSection("🏡 Auto Center Plot")
+    EventTab:CreateToggle({Name="Enabled", CurrentValue=false, Flag="AutoCenterPlot", Callback=function(v) if v then startModule("AutoCenterPlot") else stopModule("AutoCenterPlot") end end})
+    EventTab:CreateSlider({Name="Interval", Range={1,30}, Increment=1, Suffix="s", CurrentValue=Config.Timings.CenterPlotInterval, Flag="CenterPlotInterval", Callback=function(v) Config.Timings.CenterPlotInterval=v end})
 
     -------------------------------------------------------
     -- TAB: SERVER (auto join / boost)
