@@ -1423,7 +1423,7 @@ function Plant._equipSeed(preferSeed, skipMutated)
     local sn, tool = Plant._getEquippedSeed()
     if sn then
         if skipMutated then
-            local mut = tool:GetAttribute and tool:GetAttribute("Mutation") or ""
+            local mut = tool:GetAttribute("Mutation") or ""
             if mut == "" then return sn, tool end
         else
             return sn, tool
