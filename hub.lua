@@ -1383,11 +1383,14 @@ function Plant._findSeedsInBackpack(preferSeed, skipMutated)
             local sn = tool:GetAttribute("SeedTool")
             if sn then
                 -- Skip mutated seeds if filter enabled
+                local include = true
                 if skipMutated then
                     local mut = tool:GetAttribute("Mutation") or ""
-                    if mut ~= "" then continue end
+                    if mut ~= "" then include = false end
                 end
-                table.insert(seeds, { tool = tool, seedName = sn })
+                if include then
+                    table.insert(seeds, { tool = tool, seedName = sn })
+                end
             end
         end
     end
