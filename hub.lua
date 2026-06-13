@@ -3988,26 +3988,23 @@ do
         if Center._running then return end
         Center._running = true
 
-        local interval = config.Timings.CenterPlotInterval or 5
-
-        Center._thread = task.spawn(function()
-            while Center._running do
-                local hrp = Utils.getHumanoidRootPart()
-                local garden = Utils.getMyGarden()
-                if hrp and garden then
-                    local spawnPoint = garden:FindFirstChild("SpawnPoint")
-                        or garden:FindFirstChildWhichIsA("BasePart")
-                    if spawnPoint then
-                        pcall(function()
-                            hrp.CFrame = spawnPoint.CFrame + Vector3.new(0, 3, 0)
-                        end)
-                    end
+        -- One-shot: teleport to plot center on load, then stop
+        task.spawn(function()
+            task.wait(1) -- brief wait for character to load
+            local hrp = Utils.getHumanoidRootPart()
+            local garden = Utils.getMyGarden()
+            if hrp and garden then
+                local spawnPoint = garden:FindFirstChild("SpawnPoint")
+                    or garden:FindFirstChildWhichIsA("BasePart")
+                if spawnPoint then
+                    pcall(function()
+                        hrp.CFrame = spawnPoint.CFrame + Vector3.new(0, 3, 0)
+                    end)
+                    print("[GAG Hub] Centered to plot")
                 end
-                task.wait(interval)
             end
+            Center._running = false
         end)
-
-        print("[GAG Hub] Auto Center Plot started")
     end
 
     function Center.stop()
@@ -4372,8 +4369,7 @@ local function createUI()
     EventTab:CreateSlider({Name="Min Value", Range={100,10000}, Increment=100, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
 
     EventTab:CreateSection("🏡 Auto Center Plot")
-    EventTab:CreateToggle({Name="Enabled", CurrentValue=false, Flag="AutoCenterPlot", Callback=function(v) if v then startModule("AutoCenterPlot") else stopModule("AutoCenterPlot") end end})
-    EventTab:CreateSlider({Name="Interval", Range={1,30}, Increment=1, Suffix="s", CurrentValue=Config.Timings.CenterPlotInterval, Flag="CenterPlotInterval", Callback=function(v) Config.Timings.CenterPlotInterval=v end})
+    EventTab:CreateToggle({Name="Enabled (on load)", CurrentValue=false, Flag="AutoCenterPlot", Callback=function(v) if v then startModule("AutoCenterPlot") else stopModule("AutoCenterPlot") end end})
 
     -------------------------------------------------------
     -- TAB: SERVER (auto join / boost)
