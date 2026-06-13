@@ -174,3 +174,13 @@ Semantic Versioning (`MAJOR.MINOR.PATCH`):
   <b>Made for Grow A Garden</b><br>
   <sub>Single file. No dependency. Paste & play.</sub>
 </p>
+
+---
+
+## 👤 Credits
+
+| Role | Name |
+|------|------|
+| **Developer** | Brave |
+| **UI Framework** | [Rayfield](https://github.com/shlexware/Rayfield) |
+| **Game** | [Grow A Garden](https://www.roblox.com/games/...) |
