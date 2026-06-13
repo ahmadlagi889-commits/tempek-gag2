@@ -3275,6 +3275,10 @@ do
         if not part or not part.Parent then return end
         if SeedPack._claimed[part] then return end
 
+        -- Save original position
+        local origCFrame = root.CFrame
+        local packId = part:GetAttribute("SeedPack") or ""
+
         -- Teleport to seed pack
         pcall(function()
             root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
@@ -3316,7 +3320,6 @@ do
 
         -- Method 2: ClickPack remote (fallback)
         if not claimed then
-            local packId = part:GetAttribute("SeedPack") or ""
             local ok1 = pcall(function()
                 Net.fire("SeedPack.ClickPack", part)
             end)
@@ -3325,7 +3328,6 @@ do
 
         -- Method 3: OpenSeedPack invoke (fallback)
         if not claimed then
-            local packId = part:GetAttribute("SeedPack") or ""
             local ok2, result = pcall(function()
                 return Net.invoke("SeedPack.OpenSeedPack", packId)
             end)
@@ -3362,6 +3364,12 @@ do
                 task.wait(1)
             end
             SeedPack._claimed[part] = nil
+        end)
+
+        -- Return to original position
+        task.wait(0.2)
+        pcall(function()
+            root.CFrame = origCFrame
         end)
     end
 
