@@ -1556,14 +1556,9 @@ function Plant._findEmptySpots(myPlot, spacing)
         end
     end
 
-    -- Sort by distance from plot center for consistent planting order
-    local plotCenter = myPlot.PrimaryPart and myPlot.PrimaryPart.Position
-        or (myPlot:FindFirstChild("SpawnPoint") and myPlot.SpawnPoint.Position)
-        or Vector3.zero
+    -- Sort by Y descending: top soil parts first (user preference)
     table.sort(emptySpots, function(a, b)
-        local da = (Vector2.new(a.X - plotCenter.X, a.Z - plotCenter.Z)).Magnitude
-        local db = (Vector2.new(b.X - plotCenter.X, b.Z - plotCenter.Z)).Magnitude
-        return da < db
+        return a.Y > b.Y
     end)
 
     return emptySpots
