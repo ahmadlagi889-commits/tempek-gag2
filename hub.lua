@@ -4273,7 +4273,7 @@ local function createUI()
 
     local Window = Rayfield:CreateWindow({
         Name = "🌿 " .. Config.UI.Title .. " v" .. VERSION,
-        LoadingTitle = Config.UI.Subtitle,
+        LoadingTitle = Config.UI.Title .. " v" .. VERSION,
         LoadingSubtitle = "by GAG Hub",
         ConfigurationSaving = { Enabled = true, FolderName = "GAGHub", FileName = "config" },
         Discord = { Enabled = false }, KeySystem = false,
