@@ -3207,7 +3207,7 @@ do
         Gear._running = true
 
         local gearConfig = config.Gear or {}
-        local interval = gearConfig.PollInterval or 30
+        local interval = gearConfig.PollInterval or 2
 
         Gear._thread = task.spawn(function()
             while Gear._running do
@@ -4208,7 +4208,7 @@ local function createUI()
 
     ShopTab:CreateSection("🔧 Auto Buy Gear")
     ShopTab:CreateToggle({Name="Enabled", CurrentValue=false, Flag="GearBuyer", Callback=function(v) if v then startModule("GearBuyer") else stopModule("GearBuyer") end end})
-    ShopTab:CreateSlider({Name="Poll Interval", Range={10,120}, Increment=5, Suffix="s", CurrentValue=30, Flag="GearPollInterval", Callback=function(v) Config.Gear.PollInterval=v end})
+    ShopTab:CreateSlider({Name="Poll Interval", Range={1,10}, Increment=1, Suffix="s", CurrentValue=5, Flag="GearPollInterval", Callback=function(v) Config.Gear.PollInterval=v end})
     ShopTab:CreateDropdown({Name="Buy Gears", Options=AllGears, CurrentOption=Config.Gear.TargetGears, MultipleOptions=true, Flag="GearTargets", Callback=function(opts) Config.Gear.TargetGears=opts end})
 
     ShopTab:CreateSection("📦 Inventory")
