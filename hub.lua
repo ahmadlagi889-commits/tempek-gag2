@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "b00e517"
+local VERSION = "b00e518"
 
 local Config = {
     Features = {
@@ -32,7 +32,7 @@ local Config = {
         TargetSeeds = {},
         BlacklistedSeeds = {},
     },
-    Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
+    Steal = { MinFruitValue = 10000, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
     Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3, PlantOrder = "Top", BlacklistMutated = true },
     Water = { WaterAll = false, WaterFullyGrown = false, RequiredCan = "" },
@@ -4325,7 +4325,7 @@ local function createUI()
     EventTab:CreateToggle({Name="Enabled (Night)", CurrentValue=false, Flag="StealBot", Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
     EventTab:CreateSlider({Name="Interval", Range={0.5,5}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.StealInterval, Flag="StealInterval", Callback=function(v) Config.Timings.StealInterval=v end})
     EventTab:CreateSlider({Name="Max/Night", Range={5,50}, Increment=5, Suffix="", CurrentValue=Config.Steal.MaxAttemptsPerNight, Flag="MaxStealAttempts", Callback=function(v) Config.Steal.MaxAttemptsPerNight=v end})
-    EventTab:CreateSlider({Name="Min Value", Range={0,10000}, Increment=100, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
+    EventTab:CreateSlider({Name="Min Value", Range={10000,500000}, Increment=1000, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
 
     -------------------------------------------------------
     -- TAB: SERVER (auto join / boost)
