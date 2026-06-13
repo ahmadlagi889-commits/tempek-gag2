@@ -20,6 +20,7 @@ local Config = {
         AutoPlant = false, RestockSniper = false, MutationTracker = false,
         WeatherBot = false, StealBot = false, InventoryOptimizer = false,
         AutoBuyPet = false, AntiAfk = true, SeedPackClaimer = false,
+        AutoJoinServer = false,
     },
     Timings = {
         HarvestInterval = 0.5, SellInterval = 5, WaterInterval = 3,
@@ -44,6 +45,7 @@ local Config = {
         LogToConsole = true,
     },
     UI = { Title = "GAG Hub", Subtitle = "Grow A Garden Automation", NotifyDuration = 5 },
+    Server = { TargetJobId = "", AutoRejoin = true, RejoinDelay = 5, MaxRetries = 10 },
 }
 
 function Config.Notify(title, text, duration)
@@ -3447,6 +3449,151 @@ do
     end
 end
 ---------------------------------------------------------------
+-- MODULE: AUTO JOIN SERVER (teleport all accounts to same server)
+---------------------------------------------------------------
+
+Modules.AutoJoinServer = {}
+do
+    local M = Modules.AutoJoinServer
+    local TS = game:GetService("TeleportService")
+    M._running = false
+    M._thread = nil
+    M._stats = { teleports = 0, errors = 0 }
+
+    function M.start(config, Net, Utils)
+        if M._running then return end
+        M._running = true
+
+        local serverConfig = config.Server or {}
+        local targetJobId = serverConfig.TargetJobId or ""
+        local autoRejoin = serverConfig.AutoRejoin ~= false
+        local rejoinDelay = serverConfig.RejoinDelay or 5
+        local maxRetries = serverConfig.MaxRetries or 10
+
+        if targetJobId == "" then
+            warn("[GAG Hub] AutoJoinServer: no TargetJobId set — set Config.Server.TargetJobId first")
+            M._running = false
+            return
+        end
+
+        -- If already on target server, just enable auto-rejoin
+        if game.JobId == targetJobId then
+            print("[GAG Hub] Already on target server:", targetJobId)
+            if autoRejoin then
+                M._setupAutoRejoin(config, Utils)
+            end
+            return
+        end
+
+        -- Teleport to target server
+        M._thread = task.spawn(function()
+            local LP = Utils.getLocalPlayer()
+            local retries = 0
+
+            while M._running and retries < maxRetries do
+                retries += 1
+                print("[GAG Hub] AutoJoinServer: teleporting to", targetJobId, "(attempt " .. retries .. ")")
+
+                local ok, err = pcall(function()
+                    TS:TeleportToPlaceInstance(game.PlaceId, targetJobId, LP)
+                end)
+
+                if ok then
+                    M._stats.teleports += 1
+                    print("[GAG Hub] AutoJoinServer: teleport initiated")
+                    -- Wait for teleport to process
+                    task.wait(10)
+                    -- If still here, teleport may have failed
+                    if game.JobId ~= targetJobId then
+                        warn("[GAG Hub] AutoJoinServer: still on old server, retrying...")
+                    end
+                else
+                    M._stats.errors += 1
+                    warn("[GAG Hub] AutoJoinServer: teleport error:", err)
+                end
+
+                task.wait(rejoinDelay)
+            end
+
+            if retries >= maxRetries then
+                warn("[GAG Hub] AutoJoinServer: max retries reached")
+                Config.Notify("Server Join Failed", "Could not join target server after " .. maxRetries .. " attempts", 10)
+            end
+        end)
+
+        -- Setup auto-rejoin if enabled
+        if autoRejoin then
+            M._setupAutoRejoin(config, Utils)
+        end
+
+        print("[GAG Hub] AutoJoinServer started → JobId:", targetJobId)
+    end
+
+    function M._setupAutoRejoin(config, Utils)
+        local serverConfig = config.Server or {}
+        local targetJobId = serverConfig.TargetJobId or ""
+        local rejoinDelay = serverConfig.RejoinDelay or 5
+
+        -- On teleport failure (kicked/disconnected), rejoin target server
+        TS.TeleportFailed:Connect(function(player, teleportResult, errorMessage)
+            if not M._running then return end
+            if targetJobId == "" then return end
+
+            warn("[GAG Hub] TeleportFailed:", errorMessage, "— rejoining in", rejoinDelay, "s")
+            task.wait(rejoinDelay)
+
+            local LP = Utils.getLocalPlayer()
+            local retries = 0
+            while M._running and retries < 5 do
+                retries += 1
+                local ok = pcall(function()
+                    TS:TeleportToPlaceInstance(game.PlaceId, targetJobId, LP)
+                end)
+                if ok then break end
+                task.wait(rejoinDelay)
+            end
+        end)
+
+        -- On character respawn (server change), check if we need to rejoin
+        local LP = Utils.getLocalPlayer()
+        LP.CharacterAdded:Connect(function()
+            task.wait(5) -- wait for game to load
+            if not M._running then return end
+            if targetJobId == "" then return end
+
+            -- Check if we're on wrong server after respawn
+            if game.JobId ~= targetJobId then
+                print("[GAG Hub] AutoJoinServer: respawned on wrong server, rejoining target...")
+                task.wait(rejoinDelay)
+                pcall(function()
+                    TS:TeleportToPlaceInstance(game.PlaceId, targetJobId, LP)
+                end)
+            end
+        end)
+    end
+
+    function M.stop()
+        M._running = false
+    end
+
+    function M.getStats()
+        return M._stats
+    end
+
+    -- Helper: get current JobId for sharing
+    function M.getCurrentJobId()
+        return game.JobId
+    end
+
+    -- Helper: set target and start
+    function M.setTargetAndStart(jobId, config, Net, Utils)
+        if not jobId or jobId == "" then return end
+        config.Server.TargetJobId = jobId
+        if M._running then M.stop() end
+        task.wait(0.5)
+        M.start(config, Net, Utils)
+    end
+end
 -- STATUS
 ---------------------------------------------------------------
 
@@ -3790,6 +3937,69 @@ local function createUI()
     EventTab:CreateSlider({Name="Interval", Range={0.5,5}, Increment=0.5, Suffix="s", CurrentValue=Config.Timings.StealInterval, Flag="StealInterval", Callback=function(v) Config.Timings.StealInterval=v end})
     EventTab:CreateSlider({Name="Max/Night", Range={5,50}, Increment=5, Suffix="", CurrentValue=Config.Steal.MaxAttemptsPerNight, Flag="MaxStealAttempts", Callback=function(v) Config.Steal.MaxAttemptsPerNight=v end})
     EventTab:CreateSlider({Name="Min Value", Range={0,10000}, Increment=100, Suffix=" $", CurrentValue=Config.Steal.MinFruitValue, Flag="MinFruitValue", Callback=function(v) Config.Steal.MinFruitValue=v end})
+
+    -------------------------------------------------------
+    -- TAB: SERVER (auto join / boost)
+    -------------------------------------------------------
+    local ServerTab = Window:CreateTab("Server", 6035172) -- globe icon
+
+    ServerTab:CreateSection("📡 Current Server")
+    local CurrentJobParagraph = ServerTab:CreateParagraph({
+        Title = "Your JobId",
+        Content = game.JobId ~= "" and game.JobId or "N/A (studio)"
+    })
+    ServerTab:CreateButton({Name="📋 Copy JobId", Callback=function()
+        if setclipboard then
+            setclipboard(game.JobId)
+            Rayfield:Notify({Title="Copied!", Content="JobId copied to clipboard", Duration=3})
+        else
+            Rayfield:Notify({Title="JobId", Content=game.JobId, Duration=10})
+        end
+    end})
+
+    ServerTab:CreateSection("🚀 Join Target Server")
+    ServerTab:CreateInput({
+        Name = "Target JobId",
+        PlaceholderText = "Paste server JobId here...",
+        RemoveTextAfterFocusLost = false,
+        Flag = "TargetJobId",
+        Callback = function(v)
+            Config.Server.TargetJobId = v
+        end
+    })
+    ServerTab:CreateToggle({
+        Name = "Auto Join Server",
+        CurrentValue = false,
+        Flag = "AutoJoinServer",
+        Callback = function(v)
+            if v then
+                if Config.Server.TargetJobId == "" then
+                    Rayfield:Notify({Title="Error", Content="Set Target JobId first!", Duration=5})
+                    return
+                end
+                startModule("AutoJoinServer")
+            else
+                stopModule("AutoJoinServer")
+            end
+        end
+    })
+    ServerTab:CreateToggle({Name="Auto Rejoin on Disconnect", CurrentValue=Config.Server.AutoRejoin, Flag="ServerAutoRejoin", Callback=function(v) Config.Server.AutoRejoin=v end})
+    ServerTab:CreateSlider({Name="Rejoin Delay", Range={3,30}, Increment=1, Suffix="s", CurrentValue=Config.Server.RejoinDelay, Flag="ServerRejoinDelay", Callback=function(v) Config.Server.RejoinDelay=v end})
+    ServerTab:CreateSlider({Name="Max Retries", Range={1,50}, Increment=1, Suffix="", CurrentValue=Config.Server.MaxRetries, Flag="ServerMaxRetries", Callback=function(v) Config.Server.MaxRetries=v end})
+
+    -- Quick join: paste JobId + 1-click
+    ServerTab:CreateSection("⚡ Quick Join")
+    ServerTab:CreateButton({Name="🔄 Join Now (use input above)", Callback=function()
+        if Config.Server.TargetJobId == "" then
+            Rayfield:Notify({Title="Error", Content="Set Target JobId first!", Duration=5})
+            return
+        end
+        print("[GAG Hub] Quick join →", Config.Server.TargetJobId)
+        local LP = game:GetService("Players").LocalPlayer
+        pcall(function()
+            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, Config.Server.TargetJobId, LP)
+        end)
+    end})
 
     -------------------------------------------------------
     -- TAB 4: LIVE STATUS
