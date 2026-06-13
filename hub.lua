@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "9dbebd4"
+local VERSION = "90dbeec"
 
 local Config = {
     Features = {
@@ -20,13 +20,13 @@ local Config = {
         AutoPlant = false, RestockSniper = false, MutationTracker = false,
         WeatherBot = false, StealBot = false, InventoryOptimizer = false,
         AutoBuyPet = false, AntiAfk = true, SeedPackClaimer = false,
-        AutoJoinServer = false,
+        AutoJoinServer = false, AutoPetCatch = false,
     },
     Timings = {
         HarvestInterval = 0.5, SellInterval = 5, WaterInterval = 3,
         PlantInterval = 5, RestockPollInterval = 1, MutationScanInterval = 3,
         WeatherPollInterval = 5, StealInterval = 1.5, InventoryCheckInterval = 10,
-        PetHatchInterval = 2, SeedPackPollInterval = 2,
+        PetHatchInterval = 2, SeedPackPollInterval = 2, PetCatchInterval = 3,
     },
     Restock = {
         TargetSeeds = {},
@@ -46,6 +46,7 @@ local Config = {
     },
     UI = { Title = "GAG Hub", Subtitle = "Grow A Garden Automation", NotifyDuration = 5 },
     Server = { TargetJobId = "", AutoRejoin = true, RejoinDelay = 5, MaxRetries = 10 },
+    PetCatch = { MinRarity = "Common", MaxPrice = 100000, AutoReturn = true },
 }
 
 function Config.Notify(title, text, duration)
@@ -3594,6 +3595,296 @@ do
         M.start(config, Net, Utils)
     end
 end
+---------------------------------------------------------------
+-- MODULE: AUTO PET CATCH (wild pet tame + purchase)
+---------------------------------------------------------------
+
+Modules.AutoPetCatch = {}
+do
+    local M = Modules.AutoPetCatch
+    local CS = game:GetService("CollectionService")
+    M._running = false
+    M._thread = nil
+    M._connections = {}
+    M._stats = { caught = 0, scanned = 0, errors = 0, skipped = 0 }
+    M._tamed = {} -- track already-tamed pets by instance
+
+    -- Rarity priority: higher = better
+    local RARITY_ORDER = { Common = 1, Uncommon = 2, Rare = 3, Legendary = 4, Mythic = 5, Super = 6 }
+
+    function M._passesFilter(refPart, petCatchConfig)
+        local price = refPart:GetAttribute("Price") or 0
+        local rarity = refPart:GetAttribute("Rarity") or "Common"
+        local ownerUserId = refPart:GetAttribute("OwnerUserId") or 0
+        local state = refPart:GetAttribute("State") or ""
+
+        -- Skip if already owned
+        if ownerUserId ~= 0 then return false end
+        -- Skip if not wandering
+        if state ~= "wandering" then return false end
+        -- Price filter
+        local maxPrice = petCatchConfig.MaxPrice or 999999
+        if price > maxPrice then return false end
+        -- Rarity filter
+        local minRarity = petCatchConfig.MinRarity or "Common"
+        local petRarityVal = RARITY_ORDER[rarity] or 0
+        local minRarityVal = RARITY_ORDER[minRarity] or 0
+        if petRarityVal < minRarityVal then return false end
+
+        return true
+    end
+
+    function M._getWildPetModels()
+        local spawnFolder = workspace:FindFirstChild("Map")
+            and workspace.Map:FindFirstChild("WildPetSpawns")
+        if not spawnFolder then return {} end
+
+        local pets = {}
+        for _, model in ipairs(spawnFolder:GetChildren()) do
+            if model:IsA("Model") then
+                local petName = model:GetAttribute("PetName") or model.Name
+                -- Extract UUID from name: WildPet_Bunny_WildPet_uuid
+                local uuid = model.Name:match("WildPet_%w+_WildPet_(.+)")
+                table.insert(pets, {
+                    model = model,
+                    petName = petName,
+                    uuid = uuid,
+                })
+            end
+        end
+        return pets
+    end
+
+    function M._getRefPart(uuid)
+        local refFolder = workspace:FindFirstChild("Map")
+            and workspace.Map:FindFirstChild("WildPetRef")
+        if not refFolder then return nil end
+        return refFolder:FindFirstChild("WildPet_" .. uuid)
+    end
+
+    function M._catchPet(petInfo, petCatchConfig, Net, root)
+        local model = petInfo.model
+        if not model or not model.Parent then return false end
+        if M._tamed[model] then return false end
+
+        -- Get ref part for attributes
+        local refPart = petInfo.uuid and M._getRefPart(petInfo.uuid)
+        if refPart and not M._passesFilter(refPart, petCatchConfig) then
+            M._stats.skipped += 1
+            return false
+        end
+
+        -- Find ProximityPrompt on pet model
+        local prompt = nil
+        local rootPart = model:FindFirstChild("RootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+        if rootPart then
+            prompt = rootPart:FindFirstChildWhichIsA("ProximityPrompt")
+            if not prompt then
+                for _, desc in ipairs(rootPart:GetDescendants()) do
+                    if desc:IsA("ProximityPrompt") then
+                        prompt = desc
+                        break
+                    end
+                end
+            end
+        end
+
+        if not prompt then
+            -- Try searching entire model
+            for _, desc in ipairs(model:GetDescendants()) do
+                if desc:IsA("ProximityPrompt") then
+                    prompt = desc
+                    break
+                end
+            end
+        end
+
+        if not prompt then return false end
+
+        local petName = petInfo.petName or "Unknown"
+        local rarity = refPart and refPart:GetAttribute("Rarity") or "?"
+        local price = refPart and refPart:GetAttribute("Price") or 0
+
+        -- Save original position
+        local origCFrame = root.CFrame
+
+        -- Teleport to pet
+        local targetPart = rootPart or model:FindFirstChildWhichIsA("BasePart")
+        if not targetPart then return false end
+
+        pcall(function()
+            root.CFrame = targetPart.CFrame * CFrame.new(0, 5, 0)
+        end)
+        task.wait(0.5)
+
+        -- Fire ProximityPrompt
+        local caught = false
+        pcall(function()
+            local PPS = game:GetService("ProximityPromptService")
+            if PPS.TriggerPrompt then
+                PPS:TriggerPrompt(prompt, Players.LocalPlayer)
+            else
+                prompt.HoldDuration = 0
+                prompt:InputHoldBegin()
+                task.wait(0.1)
+                prompt:InputHoldEnd()
+            end
+            caught = true
+        end)
+
+        if caught then
+            -- Also try WildPetTame remote as backup
+            pcall(function()
+                Net.fire("Pets.WildPetTame", model)
+            end)
+        end
+
+        task.wait(1) -- wait for server to process
+
+        -- Return to original position
+        if petCatchConfig.AutoReturn ~= false then
+            task.wait(0.2)
+            pcall(function()
+                root.CFrame = origCFrame
+            end)
+        end
+
+        M._tamed[model] = true
+
+        -- Track stats
+        M._stats.caught += 1
+        local priceStr = Utils.formatNumber and Utils.formatNumber(price) or tostring(price)
+        print("[GAG Hub] 🐾 Caught:", petName, rarity, "¢" .. priceStr)
+        Config.Notify("Pet Caught!", petName .. " (" .. rarity .. ") for ¢" .. priceStr, 8)
+
+        -- Cleanup after pet despawns
+        task.spawn(function()
+            while model and model.Parent do
+                task.wait(1)
+            end
+            M._tamed[model] = nil
+        end)
+
+        return true
+    end
+
+    function M._scan(petCatchConfig, Net, Utils)
+        M._stats.scanned += 1
+        local LP = Utils.getLocalPlayer()
+        local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        local petModels = M._getWildPetModels()
+        if #petModels == 0 then return end
+
+        -- Build list with ref data, sort by rarity desc then price asc
+        local candidates = {}
+        for _, pet in ipairs(petModels) do
+            if not M._tamed[pet.model] then
+                local refPart = pet.uuid and M._getRefPart(pet.uuid)
+                local rarity = refPart and refPart:GetAttribute("Rarity") or "Common"
+                local price = refPart and refPart:GetAttribute("Price") or 0
+                local ownerUserId = refPart and refPart:GetAttribute("OwnerUserId") or 0
+                local state = refPart and refPart:GetAttribute("State") or ""
+
+                if ownerUserId == 0 and state == "wandering" then
+                    local petPart = pet.model:FindFirstChild("RootPart") or pet.model:FindFirstChildWhichIsA("BasePart")
+                    local petPos = petPart and petPart.Position or root.Position
+                    table.insert(candidates, {
+                        pet = pet,
+                        rarity = rarity,
+                        price = price,
+                        rarityVal = RARITY_ORDER[rarity] or 0,
+                        dist = (petPos - root.Position).Magnitude,
+                    })
+                end
+            end
+        end
+
+        -- Sort: rarity desc, then price asc (prefer expensive = rare), then distance asc
+        table.sort(candidates, function(a, b)
+            if a.rarityVal ~= b.rarityVal then return a.rarityVal > b.rarityVal end
+            if a.price ~= b.price then return a.price > b.price end
+            return a.dist < b.dist
+        end)
+
+        -- Catch each
+        for _, cand in ipairs(candidates) do
+            if not M._running then break end
+            if M._passesFilter(cand.pet.uuid and M._getRefPart(cand.pet.uuid) or nil, petCatchConfig) then
+                M._catchPet(cand.pet, petCatchConfig, Net, root)
+                task.wait(0.5)
+            end
+        end
+    end
+
+    function M._listenSpawns(petCatchConfig, Net, Utils)
+        local spawnFolder = workspace:FindFirstChild("Map")
+            and workspace.Map:FindFirstChild("WildPetSpawns")
+        if not spawnFolder then return end
+
+        local conn = spawnFolder.ChildAdded:Connect(function(model)
+            if not M._running then return end
+            if not model:IsA("Model") then return end
+
+            -- Wait for attributes to replicate
+            task.wait(1)
+
+            local petName = model:GetAttribute("PetName") or model.Name
+            local uuid = model.Name:match("WildPet_%w+_WildPet_(.+)")
+            local refPart = uuid and M._getRefPart(uuid)
+
+            if refPart and M._passesFilter(refPart, petCatchConfig) then
+                local LP = Utils.getLocalPlayer()
+                local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    print("[GAG Hub] 🐾 New wild pet spawned:", petName)
+                    M._catchPet({
+                        model = model,
+                        petName = petName,
+                        uuid = uuid,
+                    }, petCatchConfig, Net, root)
+                end
+            end
+        end)
+        table.insert(M._connections, conn)
+    end
+
+    function M.start(config, Net, Utils)
+        if M._running then return end
+        M._running = true
+
+        local petCatchConfig = config.PetCatch or {}
+        local interval = config.Timings.PetCatchInterval or 3
+
+        -- Listen for real-time spawns
+        M._listenSpawns(petCatchConfig, Net, Utils)
+
+        -- Periodic scan
+        M._thread = task.spawn(function()
+            while M._running do
+                pcall(function()
+                    M._scan(petCatchConfig, Net, Utils)
+                end)
+                task.wait(interval)
+            end
+        end)
+
+        print("[GAG Hub] Auto Pet Catch started")
+    end
+
+    function M.stop()
+        M._running = false
+        for _, conn in ipairs(M._connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        M._connections = {}
+    end
+
+    function M.getStats()
+        return M._stats
+    end
+end
 -- STATUS
 ---------------------------------------------------------------
 
@@ -3931,6 +4222,13 @@ local function createUI()
     EventTab:CreateSection("🌱 Seed Pack Claimer")
     EventTab:CreateToggle({Name="Auto Claim", CurrentValue=false, Flag="SeedPackClaimer", Callback=function(v) if v then startModule("SeedPackClaimer") else stopModule("SeedPackClaimer") end end})
     EventTab:CreateSlider({Name="Poll", Range={1,10}, Increment=1, Suffix="s", CurrentValue=Config.Timings.SeedPackPollInterval, Flag="SeedPackPollInterval", Callback=function(v) Config.Timings.SeedPackPollInterval=v end})
+
+    EventTab:CreateSection("🐾 Wild Pet Catch")
+    EventTab:CreateToggle({Name="Auto Catch", CurrentValue=false, Flag="AutoPetCatch", Callback=function(v) if v then startModule("AutoPetCatch") else stopModule("AutoPetCatch") end end})
+    EventTab:CreateSlider({Name="Scan", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.PetCatchInterval, Flag="PetCatchInterval", Callback=function(v) Config.Timings.PetCatchInterval=v end})
+    EventTab:CreateDropdown({Name="Min Rarity", Options={"Common","Uncommon","Rare","Legendary","Mythic","Super"}, CurrentOption={Config.PetCatch.MinRarity}, MultipleOptions=false, Flag="PetCatchMinRarity", Callback=function(opt) Config.PetCatch.MinRarity=type(opt)=="table" and opt[1] or opt end})
+    EventTab:CreateSlider({Name="Max Price", Range={0,500000}, Increment=10000, Suffix=" ¢", CurrentValue=Config.PetCatch.MaxPrice, Flag="PetCatchMaxPrice", Callback=function(v) Config.PetCatch.MaxPrice=v end})
+    EventTab:CreateToggle({Name="Return After Catch", CurrentValue=Config.PetCatch.AutoReturn, Flag="PetCatchAutoReturn", Callback=function(v) Config.PetCatch.AutoReturn=v end})
 
     EventTab:CreateSection("🌙 Steal Bot")
     EventTab:CreateToggle({Name="Enabled (Night)", CurrentValue=false, Flag="StealBot", Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
