@@ -4306,7 +4306,7 @@ local function createUI()
 
     EventTab:CreateSection("🌱 Seed Pack Claimer")
     EventTab:CreateToggle({Name="Auto Claim", CurrentValue=false, Flag="SeedPackClaimer", Callback=function(v) if v then startModule("SeedPackClaimer") else stopModule("SeedPackClaimer") end end})
-    EventTab:CreateSlider({Name="Poll", Range={1,10}, Increment=1, Suffix="s", CurrentValue=Config.Timings.SeedPackPollInterval, Flag="SeedPackPollInterval", Callback=function(v) Config.Timings.SeedPackPollInterval=v end})
+    EventTab:CreateSlider({Name="Poll", Range={0.1,5}, Increment=0.1, Suffix="s", CurrentValue=Config.Timings.SeedPackPollInterval, Flag="SeedPackPollInterval", Callback=function(v) Config.Timings.SeedPackPollInterval=v end})
 
     EventTab:CreateSection("🐾 Wild Pet Catch")
     EventTab:CreateToggle({Name="Auto Catch", CurrentValue=false, Flag="AutoPetCatch", Callback=function(v) if v then startModule("AutoPetCatch") else stopModule("AutoPetCatch") end end})
