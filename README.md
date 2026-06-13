@@ -179,8 +179,4 @@ Semantic Versioning (`MAJOR.MINOR.PATCH`):
 
 ## 👤 Credits
 
-| Role | Name |
-|------|------|
-| **Developer** | Brave |
-| **UI Framework** | [Rayfield](https://github.com/shlexware/Rayfield) |
-| **Game** | [Grow A Garden](https://www.roblox.com/games/...) |
+**Developer:** Brave
