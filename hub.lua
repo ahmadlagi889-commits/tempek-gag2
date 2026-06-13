@@ -34,7 +34,7 @@ local Config = {
     },
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
-    Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3, PlantOrder = "Top" },
+    Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3, PlantOrder = "Top", BlacklistedSeeds = {} },
     Water = { WaterAll = false, WaterFullyGrown = false, RequiredCan = "" },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
@@ -1373,15 +1373,19 @@ end
 -- Returns list of {tool, seedName} sorted by seed name
 ---------------------------------------------------------------
 
-function Plant._findSeedsInBackpack(preferSeed)
+function Plant._findSeedsInBackpack(preferSeed, blacklist)
     local lp = Players.LocalPlayer
     local bp = lp and lp:FindFirstChild("Backpack")
     if not bp then return {} end
+    local blacklisted = {}
+    for _, name in ipairs(blacklist or {}) do
+        blacklisted[name] = true
+    end
     local seeds = {}
     for _, tool in ipairs(bp:GetChildren()) do
         if tool:IsA("Tool") then
             local sn = tool:GetAttribute("SeedTool")
-            if sn then
+            if sn and not blacklisted[sn] then
                 table.insert(seeds, { tool = tool, seedName = sn })
             end
         end
@@ -1404,7 +1408,7 @@ end
 -- Returns seedName, toolInstance on success
 ---------------------------------------------------------------
 
-function Plant._equipSeed(preferSeed)
+function Plant._equipSeed(preferSeed, blacklist)
     local lp = Players.LocalPlayer
     local char = lp and lp.Character
     if not char then return nil, nil end
@@ -1413,10 +1417,15 @@ function Plant._equipSeed(preferSeed)
 
     -- Check if already equipped
     local sn, tool = Plant._getEquippedSeed()
-    if sn then return sn, tool end
+    if sn then
+        -- Check if equipped seed is blacklisted
+        local blacklisted = {}
+        for _, name in ipairs(blacklist or {}) do blacklisted[name] = true end
+        if not blacklisted[sn] then return sn, tool end
+    end
 
     -- Find seed in backpack
-    local seeds = Plant._findSeedsInBackpack(preferSeed)
+    local seeds = Plant._findSeedsInBackpack(preferSeed, blacklist)
     if #seeds == 0 then return nil, nil end
 
     -- Equip first seed (preferred or first available)
@@ -1626,7 +1635,7 @@ function Plant._autoPlant(plantConfig, Net, Utils)
     local preferSeed = plantConfig.PreferSeed -- optional: preferred seed name
 
     -- Step 1: USE SEED — equip from backpack before planting
-    local seedName, toolInstance = Plant._equipSeed(preferSeed)
+    local seedName, toolInstance = Plant._equipSeed(preferSeed, plantConfig.BlacklistedSeeds)
     if not seedName then
         Plant._stats.noSeeds += 1
         return
@@ -1659,7 +1668,7 @@ function Plant._autoPlant(plantConfig, Net, Utils)
         local curSn, curTool = Plant._getEquippedSeed()
         if not curSn then
             -- Re-equip if tool got consumed
-            seedName, toolInstance = Plant._equipSeed(preferSeed)
+            seedName, toolInstance = Plant._equipSeed(preferSeed, plantConfig.BlacklistedSeeds)
             if not seedName then break end
         end
 
@@ -4181,6 +4190,7 @@ local function createUI()
     FarmTab:CreateDropdown({Name="Plant Order", Options={"Top","Bottom","Random"}, CurrentOption=Config.Plant.PlantOrder, Flag="PlantOrder", Callback=function(v) Config.Plant.PlantOrder=v end})
     FarmTab:CreateSlider({Name="Grid Spacing", Range={2,8}, Increment=0.5, Suffix=" studs", CurrentValue=Config.Plant.GridSpacing, Flag="GridSpacing", Callback=function(v) Config.Plant.GridSpacing=v end})
     FarmTab:CreateInput({Name="Prefer Seed (empty=any)", PlaceholderText="e.g. Carrot", RemoveTextAfterFocusLost=false, Flag="PreferSeed", Callback=function(v) Config.Plant.PreferSeed = (v~="" and v or nil) end})
+    FarmTab:CreateDropdown({Name="Blacklist Seeds", Options=AllSeeds, CurrentOption=Config.Plant.BlacklistedSeeds, MultipleOptions=true, Flag="PlantBlacklist", Callback=function(opts) Config.Plant.BlacklistedSeeds=opts end})
 
     -------------------------------------------------------
     -- TAB 2: SHOP & PETS (restock + inventory + pets)
