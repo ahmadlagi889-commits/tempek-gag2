@@ -19,13 +19,13 @@ local Config = {
         AutoHarvest = false, AutoSell = false, AutoWater = false,
         AutoPlant = false, RestockSniper = false, MutationTracker = false,
         WeatherBot = false, StealBot = false, InventoryOptimizer = false,
-        AutoBuyPet = false, AntiAfk = true,
+        AutoBuyPet = false, AntiAfk = true, SeedPackClaimer = false,
     },
     Timings = {
         HarvestInterval = 0.5, SellInterval = 5, WaterInterval = 3,
         PlantInterval = 5, RestockPollInterval = 1, MutationScanInterval = 3,
         WeatherPollInterval = 5, StealInterval = 1.5, InventoryCheckInterval = 10,
-        PetHatchInterval = 2,
+        PetHatchInterval = 2, SeedPackPollInterval = 2,
     },
     Restock = {
         TargetSeeds = {},
@@ -3116,6 +3116,204 @@ do
     end
 end
 ---------------------------------------------------------------
+-- SEED PACK CLAIMER MODULE
+---------------------------------------------------------------
+
+Modules.SeedPackClaimer = {}
+do
+    local M = Modules.SeedPackClaimer
+    local SeedPack = M
+    SeedPack._running = false
+    SeedPack._thread = nil
+    SeedPack._connections = {}
+    SeedPack._stats = { claimed = 0, rainbow = 0, gold = 0, regular = 0, scanned = 0, errors = 0 }
+    SeedPack._claimed = {} -- track already-claimed packs by instance
+
+    ---------------------------------------------------------------
+    -- SCAN & CLAIM
+    ---------------------------------------------------------------
+
+    function SeedPack._scanAndClaim(config, Net, Utils)
+        SeedPack._stats.scanned += 1
+        local LP = Utils.getLocalPlayer()
+        if not LP or not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return end
+
+        local root = LP.Character.HumanoidRootPart
+        local spawnFolder = workspace:FindFirstChild("Map")
+            and workspace.Map:FindFirstChild("SeedPackSpawnServerLocations")
+        if not spawnFolder then return end
+
+        -- Collect all spawn parts, sort by priority (Rainbow > Gold > Regular)
+        local spawns = {}
+        for _, part in ipairs(spawnFolder:GetChildren()) do
+            if part:IsA("BasePart") and not SeedPack._claimed[part] then
+                local isRainbow = part:GetAttribute("RainbowSeed") == true
+                local isGold = part:GetAttribute("GoldSeed") == true
+                local packName = part:GetAttribute("SeedPack")
+                local priority = isRainbow and 3 or (isGold and 2 or 1)
+                table.insert(spawns, {
+                    part = part,
+                    rainbow = isRainbow,
+                    gold = isGold,
+                    pack = packName,
+                    priority = priority,
+                    dist = (part.Position - root.Position).Magnitude,
+                })
+            end
+        end
+
+        if #spawns == 0 then return end
+
+        -- Sort: priority desc, then distance asc
+        table.sort(spawns, function(a, b)
+            if a.priority ~= b.priority then return a.priority > b.priority end
+            return a.dist < b.dist
+        end)
+
+        for _, spawn in ipairs(spawns) do
+            if not SeedPack._running then break end
+            SeedPack._claimOne(spawn, Net, root)
+        end
+    end
+
+    function SeedPack._claimOne(spawn, Net, root)
+        local part = spawn.part
+        if not part or not part.Parent then return end
+        if SeedPack._claimed[part] then return end
+
+        -- Teleport to seed pack
+        pcall(function()
+            root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
+        end)
+        task.wait(0.3)
+
+        -- Try click/claim via remotes
+        local packId = part:GetAttribute("SeedPack") or ""
+        local claimed = false
+
+        -- Method 1: ClickPack (if it takes instance or string)
+        local ok1 = pcall(function()
+            Net.fire("SeedPack.ClickPack", part)
+        end)
+        if ok1 then claimed = true end
+
+        -- Method 2: OpenSeedPack (invoke for response)
+        if not claimed then
+            local ok2, result = pcall(function()
+                return Net.invoke("SeedPack.OpenSeedPack", packId)
+            end)
+            if ok2 then claimed = true end
+        end
+
+        task.wait(0.2)
+
+        -- Mark as claimed regardless (avoid re-attempt)
+        SeedPack._claimed[part] = true
+
+        -- Track stats
+        if spawn.rainbow then
+            SeedPack._stats.rainbow += 1
+            SeedPack._stats.claimed += 1
+            print("[GAG Hub] 🌈 RAINBOW SEED claimed!")
+            Config.Notify("Rainbow Seed!", "Rainbow Seed pack claimed!", 10)
+        elseif spawn.gold then
+            SeedPack._stats.gold += 1
+            SeedPack._stats.claimed += 1
+            print("[GAG Hub] 🥇 GOLD SEED claimed!")
+            Config.Notify("Gold Seed!", "Gold Seed pack claimed!", 10)
+        else
+            SeedPack._stats.regular += 1
+            SeedPack._stats.claimed += 1
+            if packId ~= "" then
+                print("[GAG Hub] Seed pack claimed:", packId)
+            end
+        end
+
+        -- Cleanup: remove from claimed list after part despawns
+        task.spawn(function()
+            while part and part.Parent do
+                task.wait(1)
+            end
+            SeedPack._claimed[part] = nil
+        end)
+    end
+
+    ---------------------------------------------------------------
+    -- LISTEN FOR NEW SPAWNS (real-time)
+    ---------------------------------------------------------------
+
+    function SeedPack._listenSpawns(config, Net, Utils)
+        local spawnFolder = workspace:FindFirstChild("Map")
+            and workspace.Map:FindFirstChild("SeedPackSpawnServerLocations")
+        if not spawnFolder then return end
+
+        local conn = spawnFolder.ChildAdded:Connect(function(part)
+            if not SeedPack._running then return end
+            if not part:IsA("BasePart") then return end
+
+            -- Wait for attributes to replicate
+            task.wait(0.5)
+
+            local isRainbow = part:GetAttribute("RainbowSeed") == true
+            local isGold = part:GetAttribute("GoldSeed") == true
+
+            -- Priority claim: rainbow/gold = instant teleport
+            if isRainbow or isGold then
+                local LP = Utils.getLocalPlayer()
+                local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    SeedPack._claimOne({
+                        part = part,
+                        rainbow = isRainbow,
+                        gold = isGold,
+                        pack = part:GetAttribute("SeedPack") or "",
+                        priority = isRainbow and 3 or 2,
+                    }, Net, root)
+                end
+            end
+        end)
+        table.insert(SeedPack._connections, conn)
+    end
+
+    ---------------------------------------------------------------
+    -- START / STOP / STATS
+    ---------------------------------------------------------------
+
+    function SeedPack.start(config, Net, Utils)
+        if SeedPack._running then return end
+        SeedPack._running = true
+
+        local interval = config.Timings.SeedPackPollInterval or 2
+
+        -- Listen for real-time spawns (instant claim for rainbow/gold)
+        SeedPack._listenSpawns(config, Net, Utils)
+
+        -- Periodic scan for existing unclaimed packs
+        SeedPack._thread = task.spawn(function()
+            while SeedPack._running do
+                pcall(function()
+                    SeedPack._scanAndClaim(config, Net, Utils)
+                end)
+                task.wait(interval)
+            end
+        end)
+
+        print("[GAG Hub] Seed Pack Claimer started")
+    end
+
+    function SeedPack.stop()
+        SeedPack._running = false
+        for _, conn in ipairs(SeedPack._connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        SeedPack._connections = {}
+    end
+
+    function SeedPack.getStats()
+        return SeedPack._stats
+    end
+end
+---------------------------------------------------------------
 -- STATUS
 ---------------------------------------------------------------
 
@@ -3446,6 +3644,10 @@ local function createUI()
     EventTab:CreateSection("🌧 Weather")
     EventTab:CreateToggle({Name="Weather Bot", CurrentValue=false, Flag="WeatherBot", Callback=function(v) if v then startModule("WeatherBot") else stopModule("WeatherBot") end end})
     EventTab:CreateSlider({Name="Poll", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.WeatherPollInterval, Flag="WeatherPollInterval", Callback=function(v) Config.Timings.WeatherPollInterval=v end})
+
+    EventTab:CreateSection("🌱 Seed Pack Claimer")
+    EventTab:CreateToggle({Name="Auto Claim", CurrentValue=false, Flag="SeedPackClaimer", Callback=function(v) if v then startModule("SeedPackClaimer") else stopModule("SeedPackClaimer") end end})
+    EventTab:CreateSlider({Name="Poll", Range={1,10}, Increment=1, Suffix="s", CurrentValue=Config.Timings.SeedPackPollInterval, Flag="SeedPackPollInterval", Callback=function(v) Config.Timings.SeedPackPollInterval=v end})
 
     EventTab:CreateSection("🌙 Steal Bot")
     EventTab:CreateToggle({Name="Enabled (Night)", CurrentValue=false, Flag="StealBot", Callback=function(v) if v then startModule("StealBot") else stopModule("StealBot") end end})
