@@ -46,7 +46,7 @@ local Config = {
     },
     UI = { Title = "GAG Hub", Subtitle = "Grow A Garden Automation", NotifyDuration = 5 },
     Server = { TargetJobId = "", AutoRejoin = true, RejoinDelay = 5, MaxRetries = 10 },
-    PetCatch = { MinRarity = "Common", MaxPrice = 100000, AutoReturn = true },
+    PetCatch = { MinRarity = "Common", AutoReturn = true },
 }
 
 function Config.Notify(title, text, duration)
@@ -3629,9 +3629,6 @@ do
         if ownerUserId ~= 0 then return false end
         -- Skip if not wandering
         if state ~= "wandering" then return false end
-        -- Price filter
-        local maxPrice = petCatchConfig.MaxPrice or 999999
-        if price > maxPrice then return false end
         -- Rarity filter
         local minRarity = petCatchConfig.MinRarity or "Common"
         local petRarityVal = RARITY_ORDER[rarity] or 0
@@ -4239,7 +4236,6 @@ local function createUI()
     EventTab:CreateToggle({Name="Auto Catch", CurrentValue=false, Flag="AutoPetCatch", Callback=function(v) if v then startModule("AutoPetCatch") else stopModule("AutoPetCatch") end end})
     EventTab:CreateSlider({Name="Scan", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.PetCatchInterval, Flag="PetCatchInterval", Callback=function(v) Config.Timings.PetCatchInterval=v end})
     EventTab:CreateDropdown({Name="Min Rarity", Options={"Common","Uncommon","Rare","Legendary","Mythic","Super"}, CurrentOption={Config.PetCatch.MinRarity}, MultipleOptions=false, Flag="PetCatchMinRarity", Callback=function(opt) Config.PetCatch.MinRarity=type(opt)=="table" and opt[1] or opt end})
-    EventTab:CreateSlider({Name="Max Price", Range={0,500000}, Increment=10000, Suffix=" ¢", CurrentValue=Config.PetCatch.MaxPrice, Flag="PetCatchMaxPrice", Callback=function(v) Config.PetCatch.MaxPrice=v end})
     EventTab:CreateToggle({Name="Return After Catch", CurrentValue=Config.PetCatch.AutoReturn, Flag="PetCatchAutoReturn", Callback=function(v) Config.PetCatch.AutoReturn=v end})
 
     EventTab:CreateSection("🌙 Steal Bot")
