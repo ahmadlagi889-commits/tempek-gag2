@@ -97,9 +97,9 @@ for _, desc in ipairs(workspace:GetDescendants()) do
             logf("  ProximityPrompt in: %s", desc.Parent:GetFullName())
             logf("    ActionText: %s", desc.ActionText)
             logf("    ObjectText: %s", desc.ObjectText)
-            logf("    HoldDuration: %s", desc.HoldDuration)
-            logf("    MaxActivationDistance: %s", desc.MaxActivationDistance)
-            logf("    Enabled: %s", desc.Enabled)
+            logf("    HoldDuration: %s", tostring(desc.HoldDuration))
+            logf("    MaxActivationDistance: %s", tostring(desc.MaxActivationDistance))
+            logf("    Enabled: %s", tostring(desc.Enabled))
         end
     end
 end
@@ -293,7 +293,7 @@ for _, desc in ipairs(workspace:GetDescendants()) do
         if allPrompts <= 50 then
             logf("  %s", desc.Parent:GetFullName())
             logf("    Action=%s Object=%s Hold=%s Dist=%s",
-                desc.ActionText, desc.ObjectText, desc.HoldDuration, desc.MaxActivationDistance)
+                tostring(desc.ActionText), tostring(desc.ObjectText), tostring(desc.HoldDuration), tostring(desc.MaxActivationDistance))
         end
     end
 end
