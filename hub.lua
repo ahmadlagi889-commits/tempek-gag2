@@ -3371,7 +3371,7 @@ do
         pcall(function()
             root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
         end)
-        task.wait(0.5)
+        task.wait(0.4)
 
         local claimed = false
 
@@ -3395,7 +3395,7 @@ do
             local pOk = pcall(function()
                 nearestPrompt.HoldDuration = 0
                 nearestPrompt:InputHoldBegin()
-                task.wait(0.2)
+                task.wait(0.1)
                 nearestPrompt:InputHoldEnd()
                 claimed = true
             end)
@@ -3420,7 +3420,7 @@ do
             if ok2 then claimed = true end
         end
 
-        task.wait(0.2)
+        task.wait(0.1)
 
         -- Mark as claimed regardless (avoid re-attempt)
         SeedPack._claimed[part] = true
