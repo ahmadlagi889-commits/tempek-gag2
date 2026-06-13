@@ -33,7 +33,7 @@ local Config = {
     },
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
-    Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3 },
+    Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3, PlantOrder = "Top" },
     Water = { WaterAll = false, WaterFullyGrown = false, RequiredCan = "" },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
@@ -1510,7 +1510,7 @@ end
 -- Returns sorted list of empty world positions
 ---------------------------------------------------------------
 
-function Plant._findEmptySpots(myPlot, spacing)
+function Plant._findEmptySpots(myPlot, spacing, sortMode)
     spacing = spacing or 3
 
     -- Collect all PlantArea parts belonging to my plot
@@ -1556,10 +1556,18 @@ function Plant._findEmptySpots(myPlot, spacing)
         end
     end
 
-    -- Sort by Y descending: top soil parts first (user preference)
-    table.sort(emptySpots, function(a, b)
-        return a.Y > b.Y
-    end)
+    -- Sort based on mode
+    sortMode = sortMode or "Top"
+    if sortMode == "Top" then
+        table.sort(emptySpots, function(a, b) return a.Y > b.Y end)
+    elseif sortMode == "Bottom" then
+        table.sort(emptySpots, function(a, b) return a.Y < b.Y end)
+    else -- Random
+        for i = #emptySpots, 2, -1 do
+            local j = math.random(1, i)
+            emptySpots[i], emptySpots[j] = emptySpots[j], emptySpots[i]
+        end
+    end
 
     return emptySpots
 end
@@ -1611,7 +1619,8 @@ function Plant._autoPlant(plantConfig, Net, Utils)
 
     -- Step 3: Find empty spots — grid scan across all PlantArea parts
     local spacing = plantConfig.GridSpacing or 3
-    local spots = Plant._findEmptySpots(myPlot, spacing)
+    local sortMode = plantConfig.PlantOrder or "Top"
+    local spots = Plant._findEmptySpots(myPlot, spacing, sortMode)
     if #spots == 0 then
         Plant._unequipTool()
         return
@@ -3419,7 +3428,7 @@ local function getFullStatus()
             local t = Config.Gear.TargetGears or {}
             info = #t > 0 and table.concat(t, ", ") or "(none)"
         elseif name == "AutoPlant" then
-            info = Config.Plant.PreferSeed or "(auto)"
+            info = (Config.Plant.PlantOrder or "Top") .. " | " .. (Config.Plant.PreferSeed or "any")
         elseif name == "AutoBuyPet" then
             info = "min: " .. (Config.Pet.MinRarity or "Rare")
         elseif name == "MutationTracker" then
@@ -3591,7 +3600,7 @@ function Stats.buildText()
             local t = Config.Gear.TargetGears or {}
             info = #t > 0 and table.concat(t, ", ") or "(none)"
         elseif name == "AutoPlant" then
-            info = Config.Plant.PreferSeed or "(auto)"
+            info = (Config.Plant.PlantOrder or "Top") .. " | " .. (Config.Plant.PreferSeed or "any")
         elseif name == "AutoBuyPet" then
             info = "min: " .. (Config.Pet.MinRarity or "Rare")
         elseif name == "MutationTracker" then
@@ -3697,6 +3706,7 @@ local function createUI()
     FarmTab:CreateDropdown({Name="Required Can (empty=any)", Options={"","Common Watering Can","Super Watering Can"}, CurrentOption=Config.Water.RequiredCan, Flag="RequiredCan", Callback=function(v) Config.Water.RequiredCan=v end})
 
     FarmTab:CreateSection("🌱 Plant Config")
+    FarmTab:CreateDropdown({Name="Plant Order", Options={"Top","Bottom","Random"}, CurrentOption=Config.Plant.PlantOrder, Flag="PlantOrder", Callback=function(v) Config.Plant.PlantOrder=v end})
     FarmTab:CreateSlider({Name="Grid Spacing", Range={2,8}, Increment=0.5, Suffix=" studs", CurrentValue=Config.Plant.GridSpacing, Flag="GridSpacing", Callback=function(v) Config.Plant.GridSpacing=v end})
     FarmTab:CreateInput({Name="Prefer Seed (empty=any)", PlaceholderText="e.g. Carrot", RemoveTextAfterFocusLost=false, Flag="PreferSeed", Callback=function(v) Config.Plant.PreferSeed = (v~="" and v or nil) end})
 
