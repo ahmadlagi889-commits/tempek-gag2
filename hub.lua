@@ -1573,6 +1573,22 @@ Restock._thread  = nil
 Restock._connections = {}
 Restock._stats = { bought = 0, scanned = 0, moneySpent = 0, errors = 0, skipped = 0 }
 
+-- Seed prices for affordability check
+local SeedPrices = {
+    ["Carrot"] = 1, ["Strawberry"] = 10, ["Blueberry"] = 25, ["Tulip"] = 40,
+    ["Tomato"] = 200, ["Apple"] = 400, ["Bamboo"] = 700, ["Corn"] = 2500,
+    ["Cactus"] = 5000, ["Pineapple"] = 10000, ["Mushroom"] = 15000,
+    ["Green Bean"] = 20000, ["Banana"] = 30000, ["Grape"] = 50000,
+    ["Coconut"] = 70000, ["Mango"] = 85000, ["Dragon Fruit"] = 120000,
+    ["Acorn"] = 200000, ["Cherry"] = 250000, ["Sunflower"] = 300000,
+    ["Venus Fly Trap"] = 400000, ["Poison Apple"] = 400000,
+    ["Pomegranate"] = 2000000, ["Ghost Pepper"] = 2800000,
+    ["Poison Ivy"] = 2800000, ["Moon Bloom"] = 7000000,
+    ["Dragon's Breath"] = 9000000,
+    ["Baby Cactus"] = 1, ["Glow Mushroom"] = 1, ["Romanesco"] = 1,
+    ["Horned Melon"] = 1, ["Gold"] = 1,
+}
+
 ---------------------------------------------------------------
 -- GET STOCK VALUES
 ---------------------------------------------------------------
@@ -1650,6 +1666,14 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
         if not Restock._running then break end
         if blacklist[seedName] then continue end
 
+        -- Affordability check
+        local price = SeedPrices[seedName] or 0
+        local sheckles = Utils.getSheckles()
+        if price > 0 and sheckles < price then
+            Restock._stats.skipped += 1
+            continue -- can't afford
+        end
+
         local stock = Restock._getStock(seedName)
         if stock == 0 then
             Restock._stats.skipped += 1
@@ -1661,6 +1685,9 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
         local maxBuys = (stock > 0 and stock) or 50 -- stock=-1 unknown, try 50
         for i = 1, maxBuys do
             if not Restock._running then break end
+
+            -- Re-check affordability inside loop
+            if price > 0 and Utils.getSheckles() < price then break end
 
             local prevStock = Restock._getStock(seedName)
             Restock._buySeed(Net, seedName)
@@ -3020,6 +3047,9 @@ do
             local maxBuys = (stock > 0 and stock) or 10
             for i = 1, maxBuys do
                 if not Gear._running then break end
+
+                -- Re-check affordability inside loop
+                if cost > 0 and Utils.getSheckles() < cost then break end
 
                 local ok, price = Gear._buyGear(Net, gearName)
                 if ok then
