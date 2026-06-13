@@ -796,6 +796,25 @@ local function toggleModule(name)
 end
 
 ---------------------------------------------------------------
+-- RESOURCES: Prices & Meta (loaded from resources.lua)
+---------------------------------------------------------------
+
+local Resources = nil
+pcall(function()
+    -- Try loading from GitHub raw (always latest)
+    local url = "https://raw.githubusercontent.com/ahmadlagi889-commits/tempek-gag2/main/resources.lua"
+    local src = game:HttpGet(url, true)
+    if src and #src > 100 then
+        Resources = loadstring(src)()
+    end
+end)
+if not Resources then
+    -- Fallback: inline minimal prices
+    Resources = { SeedPrices = {}, GearPrices = {}, SeedMeta = {}, GearMeta = {}, AllSeeds = {}, AllGears = {} }
+    warn("[GAG Hub] Failed to load resources.lua, affordability guard disabled")
+end
+
+---------------------------------------------------------------
 -- MODULE: AUTO HARVEST
 ---------------------------------------------------------------
 
@@ -1695,21 +1714,8 @@ Restock._thread  = nil
 Restock._connections = {}
 Restock._stats = { bought = 0, scanned = 0, moneySpent = 0, errors = 0, skipped = 0 }
 
--- Seed prices for affordability check
-local SeedPrices = {
-    ["Carrot"] = 1, ["Strawberry"] = 10, ["Blueberry"] = 25, ["Tulip"] = 40,
-    ["Tomato"] = 200, ["Apple"] = 400, ["Bamboo"] = 700, ["Corn"] = 2500,
-    ["Cactus"] = 5000, ["Pineapple"] = 10000, ["Mushroom"] = 15000,
-    ["Green Bean"] = 20000, ["Banana"] = 30000, ["Grape"] = 50000,
-    ["Coconut"] = 70000, ["Mango"] = 85000, ["Dragon Fruit"] = 120000,
-    ["Acorn"] = 200000, ["Cherry"] = 250000, ["Sunflower"] = 300000,
-    ["Venus Fly Trap"] = 400000, ["Poison Apple"] = 400000,
-    ["Pomegranate"] = 2000000, ["Ghost Pepper"] = 2800000,
-    ["Poison Ivy"] = 2800000, ["Moon Bloom"] = 7000000,
-    ["Dragon's Breath"] = 9000000,
-    ["Baby Cactus"] = 1, ["Glow Mushroom"] = 1, ["Romanesco"] = 1,
-    ["Horned Melon"] = 1, ["Gold"] = 1,
-}
+-- Seed prices loaded from Resources (resources.lua via loadstring)
+local SeedPrices = Resources.SeedPrices or {}
 
 ---------------------------------------------------------------
 -- GET STOCK VALUES
@@ -1819,6 +1825,7 @@ function Restock._pollAndBuy(restockConfig, Net, Utils)
             if newStock < prevStock then
                 buyCount += 1
                 Restock._stats.bought += 1
+                Restock._stats.moneySpent += price
             else
                 break -- stock didn't change, buy failed
             end
@@ -3089,30 +3096,10 @@ do
     local Gear = Modules.GearBuyer
     Gear._running = false
     Gear._thread = nil
-    Gear._stats = { scanned = 0, bought = 0, skipped = 0, errors = 0 }
+    Gear._stats = { scanned = 0, bought = 0, skipped = 0, errors = 0, moneySpent = 0 }
 
-    -- Cost map from GearShopData
-    local GearCosts = {
-        ["Trowel"]               = 1000,
-        ["Common Watering Can"]  = 2000,
-        ["Speed Mushroom"]       = 1500,
-        ["Jump Mushroom"]        = 1800,
-        ["Common Sprinkler"]     = 3000,
-        ["Sign"]                 = 4000,
-        ["Shrink Mushroom"]      = 4500,
-        ["Supersize Mushroom"]   = 4500,
-        ["Uncommon Sprinkler"]   = 10000,
-        ["Flashbang"]            = 8000,
-        ["Teleporter"]           = 18000,
-        ["Rare Sprinkler"]       = 50000,
-        ["Lantern"]              = 12000,
-        ["Gnome"]                = 50000,
-        ["Legendary Sprinkler"]  = 100000,
-        ["Basic Pot"]            = 60000,
-        ["Super Sprinkler"]      = 300000,
-        ["Super Watering Can"]   = 250000,
-        ["Wheelbarrow"]          = 500000,
-    }
+    -- Gear prices loaded from Resources (resources.lua via loadstring)
+    local GearCosts = Resources.GearPrices or {}
 
     function Gear._getGearStockFolder()
         local ok, folder = pcall(function()
@@ -3162,6 +3149,7 @@ do
             local cost = GearCosts[gearName] or 0
             local sheckles = Utils.getSheckles()
             if cost > 0 and sheckles < cost then
+                Gear._stats.skipped += 1
                 continue -- can't afford
             end
 
@@ -3173,11 +3161,18 @@ do
                 -- Re-check affordability inside loop
                 if cost > 0 and Utils.getSheckles() < cost then break end
 
+                local prevStock = Gear._getStock(gearName)
                 local ok, price = Gear._buyGear(Net, gearName)
                 if ok then
-                    buyCount += 1
-                    Gear._stats.bought += 1
-                    task.wait(0.05)
+                    task.wait(0.15) -- wait for server to update stock
+                    local newStock = Gear._getStock(gearName)
+                    if newStock < prevStock or newStock < 0 then
+                        buyCount += 1
+                        Gear._stats.bought += 1
+                        Gear._stats.moneySpent += cost
+                    else
+                        break -- stock didn't change, buy failed
+                    end
                 else
                     break
                 end
@@ -3638,8 +3633,7 @@ end)
 -- RAYFIELD UI
 ---------------------------------------------------------------
 
-local AllSeeds = {
-    -- Sorted by SellValue: low → high
+local AllSeeds = Resources.AllSeeds or {
     "Strawberry","Carrot","Blueberry","Tomato","Green Bean",
     "Apple","Pineapple","Corn","Banana","Cactus","Grape",
     "Coconut","Tulip","Baby Cactus","Mango","Pinetree",
@@ -3650,8 +3644,7 @@ local AllSeeds = {
     "Dragon's Breath","Lotus","Moon Bloom","Mushroom",
 }
 
-local AllGears = {
-    -- Sorted by Cost: low → high
+local AllGears = Resources.AllGears or {
     "Trowel","Speed Mushroom","Jump Mushroom","Common Watering Can",
     "Common Sprinkler","Sign","Shrink Mushroom","Supersize Mushroom",
     "Flashbang","Uncommon Sprinkler","Lantern","Teleporter",
