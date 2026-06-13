@@ -3279,20 +3279,53 @@ do
         pcall(function()
             root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
         end)
-        task.wait(0.3)
+        task.wait(0.5)
 
-        -- Try click/claim via remotes
-        local packId = part:GetAttribute("SeedPack") or ""
         local claimed = false
 
-        -- Method 1: ClickPack (if it takes instance or string)
-        local ok1 = pcall(function()
-            Net.fire("SeedPack.ClickPack", part)
-        end)
-        if ok1 then claimed = true end
+        -- Method 1: Fire ProximityPrompt (game uses this for interaction)
+        local prompt = part:FindFirstChildWhichIsA("ProximityPrompt")
+            or part:FindFirstChildOfClass("ProximityPrompt")
+        if not prompt then
+            -- Search descendants
+            for _, desc in ipairs(part:GetDescendants()) do
+                if desc:IsA("ProximityPrompt") then
+                    prompt = desc
+                    break
+                end
+            end
+        end
 
-        -- Method 2: OpenSeedPack (invoke for response)
+        if prompt then
+            local pOk = pcall(function()
+                -- Trigger via ProximityPromptService (proper way)
+                local PPS = game:GetService("ProximityPromptService")
+                if PPS.TriggerPrompt then
+                    PPS:TriggerPrompt(prompt, Players.LocalPlayer)
+                else
+                    -- Fallback: simulate input hold
+                    prompt.HoldDuration = 0
+                    prompt:InputHoldBegin()
+                    task.wait(0.1)
+                    prompt:InputHoldEnd()
+                end
+            end)
+            if pOk then claimed = true end
+            print("[GAG Hub] ProximityPrompt fired for:", spawn.pack or part.Name, "claimed:", claimed)
+        end
+
+        -- Method 2: ClickPack remote (fallback)
         if not claimed then
+            local packId = part:GetAttribute("SeedPack") or ""
+            local ok1 = pcall(function()
+                Net.fire("SeedPack.ClickPack", part)
+            end)
+            if ok1 then claimed = true end
+        end
+
+        -- Method 3: OpenSeedPack invoke (fallback)
+        if not claimed then
+            local packId = part:GetAttribute("SeedPack") or ""
             local ok2, result = pcall(function()
                 return Net.invoke("SeedPack.OpenSeedPack", packId)
             end)
@@ -3344,6 +3377,7 @@ do
         local conn = spawnFolder.ChildAdded:Connect(function(part)
             if not SeedPack._running then return end
             if not part:IsA("BasePart") then return end
+            if SeedPack._claimed[part] then return end
 
             -- Wait for attributes to replicate
             task.wait(0.5)
@@ -3351,19 +3385,16 @@ do
             local isRainbow = part:GetAttribute("RainbowSeed") == true
             local isGold = part:GetAttribute("GoldSeed") == true
 
-            -- Priority claim: rainbow/gold = instant teleport
-            if isRainbow or isGold then
-                local LP = Utils.getLocalPlayer()
-                local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    SeedPack._claimOne({
-                        part = part,
-                        rainbow = isRainbow,
-                        gold = isGold,
-                        pack = part:GetAttribute("SeedPack") or "",
-                        priority = isRainbow and 3 or 2,
-                    }, Net, root)
-                end
+            local LP = Utils.getLocalPlayer()
+            local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                SeedPack._claimOne({
+                    part = part,
+                    rainbow = isRainbow,
+                    gold = isGold,
+                    pack = part:GetAttribute("SeedPack") or "",
+                    priority = isRainbow and 3 or (isGold and 2 or 1),
+                }, Net, root)
             end
         end)
         table.insert(SeedPack._connections, conn)
