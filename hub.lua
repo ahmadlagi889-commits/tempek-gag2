@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "b00e513"
+local VERSION = "b00e514"
 
 local Config = {
     Features = {
@@ -1363,6 +1363,7 @@ function Plant._getEquippedSeed()
     if not char then return nil, nil end
     local tool = char:FindFirstChildWhichIsA("Tool")
     if not tool then return nil, nil end
+    if tool:GetAttribute("MainCategory") ~= "Seed" then return nil, nil end
     local seedName = tool:GetAttribute("SeedTool")
     if not seedName then return nil, nil end
     return seedName, tool
@@ -1373,6 +1374,12 @@ end
 -- Returns list of {tool, seedName} sorted by seed name
 ---------------------------------------------------------------
 
+function Plant._isMutatedSeed(seedToolValue)
+    if not seedToolValue then return false end
+    return string.match(seedToolValue, "^Gold ") ~= nil
+        or string.match(seedToolValue, "^Rainbow ") ~= nil
+end
+
 function Plant._findSeedsInBackpack(preferSeed, skipMutated)
     local lp = Players.LocalPlayer
     local bp = lp and lp:FindFirstChild("Backpack")
@@ -1380,13 +1387,13 @@ function Plant._findSeedsInBackpack(preferSeed, skipMutated)
     local seeds = {}
     for _, tool in ipairs(bp:GetChildren()) do
         if tool:IsA("Tool") then
+            local cat = tool:GetAttribute("MainCategory")
             local sn = tool:GetAttribute("SeedTool")
-            if sn then
-                -- Skip mutated seeds if filter enabled
+            if sn and cat == "Seed" then
+                -- Skip Gold/Rainbow mutated seeds if filter enabled
                 local include = true
-                if skipMutated then
-                    local mut = tool:GetAttribute("Mutation") or ""
-                    if mut ~= "" then include = false end
+                if skipMutated and Plant._isMutatedSeed(sn) then
+                    include = false
                 end
                 if include then
                     table.insert(seeds, { tool = tool, seedName = sn })
@@ -1419,12 +1426,11 @@ function Plant._equipSeed(preferSeed, skipMutated)
     local humanoid = char:FindFirstChildWhichIsA("Humanoid")
     if not humanoid then return nil, nil end
 
-    -- Check if already equipped (and not mutated if filter on)
+    -- Check if already equipped (and not Gold/Rainbow mutated if filter on)
     local sn, tool = Plant._getEquippedSeed()
     if sn then
         if skipMutated then
-            local mut = tool:GetAttribute("Mutation") or ""
-            if mut == "" then return sn, tool end
+            if not Plant._isMutatedSeed(sn) then return sn, tool end
         else
             return sn, tool
         end
