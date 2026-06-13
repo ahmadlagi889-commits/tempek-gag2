@@ -34,7 +34,7 @@ local Config = {
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
     Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3 },
-    Water = { WaterAll = false, WaterFullyGrown = false },
+    Water = { WaterAll = false, WaterFullyGrown = false, PreferCan = "" },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
     Gear = { TargetGears = {} },
@@ -1134,7 +1134,7 @@ Water._stats = { watered = 0, scans = 0, errors = 0, noCan = 0 }
 -- Can types: "Common Watering Can", "Super Watering Can"
 ---------------------------------------------------------------
 
-function Water._findCan()
+function Water._findCan(preferCan)
     local LP = Players.LocalPlayer
     if not LP then return nil, nil end
 
@@ -1144,7 +1144,14 @@ function Water._findCan()
             if tool:IsA("Tool") then
                 local canName = tool:GetAttribute("WateringCan")
                 if canName then
-                    return tool, canName
+                    -- Filter by preference if set
+                    if preferCan and preferCan ~= "" then
+                        if canName == preferCan then
+                            return tool, canName
+                        end
+                    else
+                        return tool, canName
+                    end
                 end
             end
         end
@@ -1213,7 +1220,7 @@ function Water._waterPlants(config, Net, Utils)
     Water._stats.scans += 1
 
     -- 1. Find + equip watering can
-    local canTool, canName = Water._findCan()
+    local canTool, canName = Water._findCan(config.Water.PreferCan)
     if not canTool then
         Water._stats.noCan += 1
         return
@@ -3691,6 +3698,7 @@ local function createUI()
 
     FarmTab:CreateSection("💧 Water Config")
     FarmTab:CreateToggle({Name="Water Fully Grown", CurrentValue=false, Flag="WaterFullyGrown", Callback=function(v) Config.Water.WaterFullyGrown=v end})
+    FarmTab:CreateDropdown({Name="Prefer Can", Options={"","Common Watering Can","Super Watering Can"}, CurrentOption=Config.Water.PreferCan, Flag="PreferCan", Callback=function(v) Config.Water.PreferCan=v end})
 
     FarmTab:CreateSection("🌱 Plant Config")
     FarmTab:CreateSlider({Name="Grid Spacing", Range={2,8}, Increment=0.5, Suffix=" studs", CurrentValue=Config.Plant.GridSpacing, Flag="GridSpacing", Callback=function(v) Config.Plant.GridSpacing=v end})
