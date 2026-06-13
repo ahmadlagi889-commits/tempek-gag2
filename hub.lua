@@ -3290,35 +3290,33 @@ do
 
         local claimed = false
 
-        -- Method 1: Fire ProximityPrompt (game uses this for interaction)
-        local prompt = part:FindFirstChildWhichIsA("ProximityPrompt")
-            or part:FindFirstChildOfClass("ProximityPrompt")
-        if not prompt then
-            -- Search descendants
-            for _, desc in ipairs(part:GetDescendants()) do
-                if desc:IsA("ProximityPrompt") then
-                    prompt = desc
-                    break
+        -- Method 1: Find nearest ProximityPrompt after teleport
+        local nearestPrompt = nil
+        local nearestDist = math.huge
+        for _, desc in ipairs(workspace:GetDescendants()) do
+            if desc:IsA("ProximityPrompt") and desc.Enabled then
+                local promptParent = desc.Parent
+                if promptParent and promptParent:IsA("BasePart") then
+                    local dist = (promptParent.Position - root.Position).Magnitude
+                    if dist < nearestDist and dist <= desc.MaxActivationDistance then
+                        nearestDist = dist
+                        nearestPrompt = desc
+                    end
                 end
             end
         end
 
-        if prompt then
+        if nearestPrompt then
             local pOk = pcall(function()
-                -- Trigger via ProximityPromptService (proper way)
-                local PPS = game:GetService("ProximityPromptService")
-                if PPS.TriggerPrompt then
-                    PPS:TriggerPrompt(prompt, Players.LocalPlayer)
-                else
-                    -- Fallback: simulate input hold
-                    prompt.HoldDuration = 0
-                    prompt:InputHoldBegin()
-                    task.wait(0.1)
-                    prompt:InputHoldEnd()
-                end
+                nearestPrompt.HoldDuration = 0
+                nearestPrompt:InputHoldBegin()
+                task.wait(0.2)
+                nearestPrompt:InputHoldEnd()
+                claimed = true
             end)
-            if pOk then claimed = true end
-            print("[GAG Hub] ProximityPrompt fired for:", spawn.pack or part.Name, "claimed:", claimed)
+            if claimed then
+                print("[GAG Hub] ProximityPrompt fired for:", spawn.pack or part.Name, "dist:", math.floor(nearestDist))
+            end
         end
 
         -- Method 2: ClickPack remote (fallback)
@@ -3674,32 +3672,8 @@ do
             return false
         end
 
-        -- Find ProximityPrompt on pet model
-        local prompt = nil
         local rootPart = model:FindFirstChild("RootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-        if rootPart then
-            prompt = rootPart:FindFirstChildWhichIsA("ProximityPrompt")
-            if not prompt then
-                for _, desc in ipairs(rootPart:GetDescendants()) do
-                    if desc:IsA("ProximityPrompt") then
-                        prompt = desc
-                        break
-                    end
-                end
-            end
-        end
-
-        if not prompt then
-            -- Try searching entire model
-            for _, desc in ipairs(model:GetDescendants()) do
-                if desc:IsA("ProximityPrompt") then
-                    prompt = desc
-                    break
-                end
-            end
-        end
-
-        if not prompt then return false end
+        if not rootPart then return false end
 
         local petName = petInfo.petName or "Unknown"
         local rarity = refPart and refPart:GetAttribute("Rarity") or "?"
@@ -3709,46 +3683,60 @@ do
         local origCFrame = root.CFrame
 
         -- Teleport to pet
-        local targetPart = rootPart or model:FindFirstChildWhichIsA("BasePart")
-        if not targetPart then return false end
-
         pcall(function()
-            root.CFrame = targetPart.CFrame * CFrame.new(0, 5, 0)
+            root.CFrame = rootPart.CFrame * CFrame.new(0, 5, 0)
         end)
         task.wait(0.5)
 
-        -- Fire ProximityPrompt
-        local caught = false
-
-        -- Method 1: WildPetTame remote (primary — no prompt needed)
-        local ok1, err1 = pcall(function()
-            Net.fire("Pets.WildPetTame", model)
-        end)
-        if ok1 then
-            caught = true
-            print("[GAG Hub] 🐾 WildPetTame fired for:", petName)
-        else
-            warn("[GAG Hub] WildPetTame error:", err1)
+        -- Find nearest ProximityPrompt to player after teleport
+        local nearestPrompt = nil
+        local nearestDist = math.huge
+        for _, desc in ipairs(workspace:GetDescendants()) do
+            if desc:IsA("ProximityPrompt") and desc.Enabled then
+                local promptParent = desc.Parent
+                if promptParent and promptParent:IsA("BasePart") then
+                    local dist = (promptParent.Position - root.Position).Magnitude
+                    if dist < nearestDist and dist <= desc.MaxActivationDistance then
+                        nearestDist = dist
+                        nearestPrompt = desc
+                    end
+                end
+            end
         end
 
-        -- Method 2: WildPetCollected (backup)
+        local caught = false
+
+        -- Method 1: Fire nearest ProximityPrompt (primary)
+        if nearestPrompt then
+            local pOk = pcall(function()
+                nearestPrompt.HoldDuration = 0
+                nearestPrompt:InputHoldBegin()
+                task.wait(0.2)
+                nearestPrompt:InputHoldEnd()
+                caught = true
+            end)
+            if caught then
+                print("[GAG Hub] 🐾 ProximityPrompt fired for:", petName, "dist:", math.floor(nearestDist))
+            end
+        end
+
+        -- Method 2: WildPetTame remote (backup)
+        if not caught then
+            local ok1, err1 = pcall(function()
+                Net.fire("Pets.WildPetTame", model)
+            end)
+            if ok1 then
+                caught = true
+                print("[GAG Hub] 🐾 WildPetTame fired for:", petName)
+            else
+                warn("[GAG Hub] WildPetTame error:", err1)
+            end
+        end
+
+        -- Method 3: WildPetCollected (backup)
         if not caught then
             pcall(function()
                 Net.fire("Pets.WildPetCollected", model)
-                caught = true
-            end)
-        end
-
-        -- Method 3: ProximityPrompt (last resort)
-        if not caught and prompt then
-            -- Reset hold duration to match game's 1s, hold manually
-            local originalHold = prompt.HoldDuration
-            pcall(function()
-                prompt.HoldDuration = 0
-                prompt:InputHoldBegin()
-                task.wait(0.2)
-                prompt:InputHoldEnd()
-                prompt.HoldDuration = originalHold
                 caught = true
             end)
         end
