@@ -3719,23 +3719,37 @@ do
 
         -- Fire ProximityPrompt
         local caught = false
-        pcall(function()
-            local PPS = game:GetService("ProximityPromptService")
-            if PPS.TriggerPrompt then
-                PPS:TriggerPrompt(prompt, Players.LocalPlayer)
-            else
+
+        -- Method 1: WildPetTame remote (primary — no prompt needed)
+        local ok1, err1 = pcall(function()
+            Net.fire("Pets.WildPetTame", model)
+        end)
+        if ok1 then
+            caught = true
+            print("[GAG Hub] 🐾 WildPetTame fired for:", petName)
+        else
+            warn("[GAG Hub] WildPetTame error:", err1)
+        end
+
+        -- Method 2: WildPetCollected (backup)
+        if not caught then
+            pcall(function()
+                Net.fire("Pets.WildPetCollected", model)
+                caught = true
+            end)
+        end
+
+        -- Method 3: ProximityPrompt (last resort)
+        if not caught and prompt then
+            -- Reset hold duration to match game's 1s, hold manually
+            local originalHold = prompt.HoldDuration
+            pcall(function()
                 prompt.HoldDuration = 0
                 prompt:InputHoldBegin()
-                task.wait(0.1)
+                task.wait(0.2)
                 prompt:InputHoldEnd()
-            end
-            caught = true
-        end)
-
-        if caught then
-            -- Also try WildPetTame remote as backup
-            pcall(function()
-                Net.fire("Pets.WildPetTame", model)
+                prompt.HoldDuration = originalHold
+                caught = true
             end)
         end
 
