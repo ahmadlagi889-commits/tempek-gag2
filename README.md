@@ -1,8 +1,17 @@
-# GAG Hub - Grow A Garden Automation
+<p align="center">
+  <h1 align="center">🌿 GAG Hub</h1>
+  <p align="center"><b>Grow A Garden — All-in-One Automation Suite</b></p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/version-1.0.0-blue?style=flat-square" alt="version">
+    <img src="https://img.shields.io/badge/modules-15-green?style=flat-square" alt="modules">
+    <img src="https://img.shields.io/badge/file-single-ff69b4?style=flat-square" alt="single-file">
+    <img src="https://img.shields.io/badge/UI-Rayfield-purple?style=flat-square" alt="rayfield">
+  </p>
+</p>
 
-All-in-one automation suite. Single file, single loadstring.
+---
 
-## Quick Start
+## ⚡ Quick Start
 
 Paste di executor:
 
@@ -10,55 +19,158 @@ Paste di executor:
 loadstring(game:HttpGet("https://raw.githubusercontent.com/ahmadlagi889-commits/tempek-gag2/main/hub.lua"))()
 ```
 
-## Features
+---
+
+## 🎯 Features (15 Modules)
+
+### 🌾 Farming
 
 | Module | Description |
 |--------|-------------|
-| AutoHarvest | Auto collect semua fruit di garden |
-| AutoSell | Auto sell ke NPC, threshold-based |
-| AutoWater | Auto water tanaman + sprinkler |
-| AutoPlant | Auto plant seed di empty plots |
-| RestockSniper | Monitor restock timer, snipe seed langka |
-| MutationTracker | Monitor mutation, alert high-value |
-| WeatherBot | Monitor weather cycle, Bloodmoon/Rainbow alert |
-| StealBot | Steal dari garden player lain (night only) |
-| InventoryOptimizer | Auto-favorite, promote, drop item |
+| **Auto Harvest** | Collect semua fruit yang ripe di garden |
+| **Auto Sell** | Sell ke NPC, configurable mode (all/threshold) |
+| **Auto Water** | Water tanaman, skip fully grown, support watering can filter |
+| **Auto Plant** | Plant seed ke empty plots, grid-based, filter mutasi Gold/Rainbow |
+| **Auto Center Plot** | One-shot teleport ke center soil saat script load |
 
-## Console API
+### 🛒 Shop
 
-```lua
-_G.GAGHub.toggle("AutoHarvest")    -- toggle module
-_G.GAGHub.status()                  -- print status
-_G.GAGHub.enableAll()               -- start semua
-_G.GAGHub.disableAll()              -- stop semua
-_G.GAGHub.stats("AutoHarvest")     -- detail stats
+| Module | Description |
+|--------|-------------|
+| **Restock Sniper** | Monitor seed restock, auto buy target seed langka |
+| **Gear Buyer** | Auto buy gear dari shop |
+| **Inventory Optimizer** | Auto-favorite high-value, promote, drop junk |
+| **Auto Hatch Pet** | Auto hatch egg, filter berdasarkan rarity |
+
+### 🌙 Events
+
+| Module | Description |
+|--------|-------------|
+| **Mutation Tracker** | Monitor mutation, alert high-value (Gold, Rainbow, Starstruck) |
+| **Weather Bot** | Track weather cycle, Bloodmoon/Rainbow alert |
+| **Seed Pack Claimer** | Auto scan & claim seed pack spawn di map |
+| **Wild Pet Catch** | Auto catch wild pet, filter rarity |
+| **Steal Bot** | Night-only, teleport ke high-value fruit → fire prompt → tp base |
+
+### 🖥 System
+
+| Module | Description |
+|--------|-------------|
+| **Anti-AFK** | Prevent kick + auto rejoin |
+| **Auto Join Server** | Join target server by JobId |
+
+---
+
+## 🎮 UI
+
+Rayfield UI dengan 5 tab:
+
+| Tab | Content |
+|-----|---------|
+| 🌿 **Farming** | Toggle harvest/sell/water/plant, intervals, config |
+| 🛒 **Shop** | Restock sniper, gear buyer, inventory, pets |
+| ⚡ **Events** | Mutation, weather, seed pack, pet catch, steal, center |
+| 🌐 **Server** | JobId, copy server, quick join, auto join |
+| 📊 **Status** | Live stats per module, controls |
+
+---
+
+## 🧬 Steal Bot Flow
+
+```
+Night detected
+  → Scan semua garden (skip plot sendiri)
+  → Check garden lock (owner inside plot = locked, skip)
+  → Filter: HoldDuration == 0, Enabled, not Collected
+  → Sort by value DESC
+  → Teleport ke fruit → fireproximityprompt → teleport ke base
+  → Repeat sampai max attempts atau sunrise
 ```
 
-## Config
+**Config:** Min Value 100–10,000 | Max/Night 5–100 | Interval 0.5–5s
 
-Edit config di awal `hub.lua`:
-- `Config.Features` — default on/off per module
-- `Config.Timings` — interval per module (detik)
-- `Config.Restock.TargetSeeds` — seed target untuk restock sniper
-- `Config.Steal.MinFruitValue` — minimum value untuk steal
-- `Config.Mutation.AlertMutations` — mutation yang trigger alert
+---
 
-## Architecture
+## 🌱 Auto Plant Flow
 
-Single file (`hub.lua`), ~2600 baris. Semua module inlined:
-- **Networking** — auto-discover remote events, retry, cache
-- **Utils** — garden/player/inventory helpers
-- **Anti-AFK** — prevent kick + auto rejoin
-- **9 Feature Modules** — masing-masing punya `start()`/`stop()`/`getStats()`
+```
+Backpack scan
+  → Filter: MainCategory == "Seed"
+  → Skip mutated: SeedTool = "Gold" / "Rainbow" (bare atau prefix)
+  → Equip seed → Generate grid dari PlantArea
+  → Plant ke semua empty spots → Unequip
+```
 
-## Hot Reload
+---
 
-Edit `hub.lua` di GitHub, push. Di game:
+## 🔧 Console API
+
 ```lua
--- Re-execute loadstring untuk reload
+_G.GAGHub.toggle("AutoHarvest")     -- toggle module
+_G.GAGHub.status()                   -- print semua status
+_G.GAGHub.enableAll()                -- start semua module
+_G.GAGHub.disableAll()               -- stop semua module
+_G.GAGHub.stats("StealBot")          -- detail stats module
+_G.GAGHub.refreshNetwork()           -- refresh remote cache
+```
+
+---
+
+## ⚙️ Config
+
+Edit di awal `hub.lua` atau via UI:
+
+```lua
+Config.Features     -- default on/off per module
+Config.Timings      -- interval per module (detik)
+Config.Restock      -- target seeds, blacklist
+Config.Steal        -- min value, max attempts, prefer mutations
+Config.Plant        -- grid spacing, plant order, blacklist mutated
+Config.Water        -- watering can filter, water fully grown
+Config.Mutation     -- alert list, price multipliers
+Config.PetCatch     -- min rarity, auto return
+```
+
+---
+
+## 🏗 Architecture
+
+```
+hub.lua (~4500 baris, single file, no dependency)
+├── Networking    — auto-discover remotes, cache, retry, fire/invoke/on
+├── Utils         — garden/player/inventory/value helpers
+├── AntiAFK       — prevent kick + auto rejoin
+├── 15 Modules    — masing-masing: start()/stop()/getStats()
+├── Rayfield UI   — 5 tabs, toggles, sliders, dropdowns
+└── Console API   — _G.GAGHub
+```
+
+**Remote resolution:** 3 metode — `require()` → `getgc()` → `Packet pre-require`
+
+---
+
+## 🔄 Hot Reload
+
+```lua
+-- Edit hub.lua di GitHub, push, lalu re-execute:
 loadstring(game:HttpGet("https://raw.githubusercontent.com/ahmadlagi889-commits/tempek-gag2/main/hub.lua"))()
 ```
 
-## UI
+---
 
-Rayfield UI auto-load. Toggle per module, status refresh, enable/disable all.
+## 📋 Versioning
+
+Semantic Versioning (`MAJOR.MINOR.PATCH`):
+
+| Type | When |
+|------|------|
+| **MAJOR** | Breaking changes, rewrite besar |
+| **MINOR** | Fitur baru, module baru |
+| **PATCH** | Bug fix, tuning, adjust kecil |
+
+---
+
+<p align="center">
+  <b>Made for Grow A Garden</b><br>
+  <sub>Single file. No dependency. Paste & play.</sub>
+</p>
