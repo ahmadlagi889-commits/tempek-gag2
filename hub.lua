@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "b00e516"
+local VERSION = "b00e517"
 
 local Config = {
     Features = {
@@ -2379,12 +2379,58 @@ do
     end
 
     ---------------------------------------------------------------
+    -- CHECK IF GARDEN IS UNLOCKED (owner left plot)
+    -- Checks: attribute Locked, BoolValue Locked, owner proximity
+    -- Returns true if garden is STEALABLE (unlocked)
+    ---------------------------------------------------------------
+
+    function Steal._isGardenUnlocked(garden)
+        -- Check 1: garden attribute "Locked"
+        local locked = garden:GetAttribute("Locked")
+        if locked == true then return false end
+
+        -- Check 2: BoolValue "Locked" inside garden
+        local lockVal = garden:FindFirstChild("Locked")
+        if lockVal and lockVal:IsA("BoolValue") and lockVal.Value == true then
+            return false
+        end
+
+        -- Check 3: attribute "GardenLocked"
+        local gl = garden:GetAttribute("GardenLocked")
+        if gl == true then return false end
+
+        -- Check 4: owner player proximity (if owner near plot → locked)
+        local ownerUserId = garden:GetAttribute("OwnerUserId")
+            or garden:GetAttribute("Owner")
+        if ownerUserId then
+            ownerUserId = tonumber(ownerUserId)
+            if ownerUserId then
+                local Players = game:GetService("Players")
+                local owner = Players:GetPlayerByUserId(ownerUserId)
+                if owner and owner.Character then
+                    local ownerHRP = owner.Character:FindFirstChild("HumanoidRootPart")
+                    local refPart = garden:FindFirstChild("SpawnPoint")
+                        or garden:FindFirstChildWhichIsA("BasePart")
+                    if ownerHRP and refPart then
+                        local dist = (ownerHRP.Position - refPart.Position).Magnitude
+                        -- Owner within ~50 studs of their plot = likely present → locked
+                        if dist < 50 then return false end
+                    end
+                end
+            end
+        end
+
+        return true -- no lock detected → unlocked → stealable
+    end
+
+    ---------------------------------------------------------------
     -- FIND STEALABLE PROMPTS ON OTHER PLAYERS' GARDENS
     -- Matching decompiled u87 guard logic:
     --   gate: Night.Value == true
     --   prompt.Enabled == true
     --   prompt:GetAttribute("Collected") != true
     --   StealPrompt + HoldDuration > 0 → SKIP (Bamboo)
+    --   garden must be UNLOCKED (owner left plot)
     --   get PlantId/FruitId from parent fruit Model
     ---------------------------------------------------------------
 
@@ -2396,6 +2442,9 @@ do
         for _, garden in ipairs(gardens:GetChildren()) do
             local plotNum = tonumber(garden.Name:match("Plot(%d+)"))
             if plotNum and plotNum ~= myPlotId then
+                -- Gate: only steal from unlocked gardens
+                if not Steal._isGardenUnlocked(garden) then continue end
+
                 local plantsFolder = garden:FindFirstChild("Plants")
                 if plantsFolder then
                     for _, plantModel in ipairs(plantsFolder:GetChildren()) do
