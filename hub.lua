@@ -985,6 +985,29 @@ end
 ---------------------------------------------------------------
 
 function Sell._autoSell(sellConfig, Net, Utils)
+    -- Guard: skip if no fruits in backpack
+    local lp = Players.LocalPlayer
+    local bp = lp and lp:FindFirstChild("Backpack")
+    local hasFruit = false
+    if bp then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") and (tool:GetAttribute("FruitName") or tool:GetAttribute("IsFruit")) then
+                hasFruit = true
+                break
+            end
+        end
+    end
+    -- Also check character (equipped tool)
+    if not hasFruit and lp and lp.Character then
+        for _, tool in ipairs(lp.Character:GetChildren()) do
+            if tool:IsA("Tool") and (tool:GetAttribute("FruitName") or tool:GetAttribute("IsFruit")) then
+                hasFruit = true
+                break
+            end
+        end
+    end
+    if not hasFruit then return end
+
     local mode = sellConfig.Mode or "all"
 
     if mode == "all" then
