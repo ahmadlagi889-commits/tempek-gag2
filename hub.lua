@@ -34,7 +34,7 @@ local Config = {
     Steal = { MinFruitValue = 100, MaxAttemptsPerNight = 20, PreferMutations = true },
     Sell = { Mode = "all", UseDailyDeal = false },
     Plant = { OnlyEmptyPlots = true, PreferSeed = nil, GridSpacing = 3 },
-    Water = { WaterAll = false },
+    Water = { WaterAll = false, WaterFullyGrown = false },
     Inventory = { FavoriteThreshold = 500, AutoPromote = true, DropThreshold = 5 },
     Pet = { MinRarity = "Rare", AutoSellUnwanted = false },
     Gear = { TargetGears = {} },
@@ -1122,10 +1122,63 @@ Modules.AutoWater = {}
 do
     local M = Modules.AutoWater
     local Water = M
+    local Players = game:GetService("Players")
 Water._running = false
 Water._thread  = nil
 Water._connections = {}
-Water._stats = { watered = 0, scans = 0, errors = 0 }
+Water._stats = { watered = 0, scans = 0, errors = 0, noCan = 0 }
+
+---------------------------------------------------------------
+-- FIND WATERING CAN TOOL IN BACKPACK/CHARACTER
+-- Tool attribute: "WateringCan" = can name string
+-- Can types: "Common Watering Can", "Super Watering Can"
+---------------------------------------------------------------
+
+function Water._findCan()
+    local LP = Players.LocalPlayer
+    if not LP then return nil, nil end
+
+    local function scanContainer(container)
+        if not container then return nil end
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") then
+                local canName = tool:GetAttribute("WateringCan")
+                if canName then
+                    return tool, canName
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Check character first (already equipped)
+    local char = LP.Character
+    local tool, canName = scanContainer(char)
+    if tool then return tool, canName end
+
+    -- Check backpack
+    local backpack = LP:FindFirstChild("Backpack")
+    tool, canName = scanContainer(backpack)
+    return tool, canName
+end
+
+---------------------------------------------------------------
+-- EQUIP WATERING CAN
+---------------------------------------------------------------
+
+function Water._equipCan(tool)
+    local LP = Players.LocalPlayer
+    local char = LP and LP.Character
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+
+    -- Already in character?
+    if tool.Parent == char then return true end
+
+    pcall(function() humanoid:EquipTool(tool) end)
+    task.wait(0.2)
+    return tool.Parent == char
+end
 
 ---------------------------------------------------------------
 -- START
@@ -1149,6 +1202,8 @@ end
 
 ---------------------------------------------------------------
 -- WATER PLANTS
+-- Reference: Controllers_WateringcanController.TryWater()
+-- Remote: WateringCan.UseWateringCan(position, canName, toolInstance)
 ---------------------------------------------------------------
 
 function Water._waterPlants(config, Net, Utils)
@@ -1156,40 +1211,72 @@ function Water._waterPlants(config, Net, Utils)
     if not garden then return end
 
     Water._stats.scans += 1
+
+    -- 1. Find + equip watering can
+    local canTool, canName = Water._findCan()
+    if not canTool then
+        Water._stats.noCan += 1
+        return
+    end
+
+    local equipped = Water._equipCan(canTool)
+    if not equipped then
+        Water._stats.errors += 1
+        return
+    end
+
+    -- 2. Scan plants
     local plants = Utils.getPlantsInGarden(garden)
+    local waterFullyGrown = config.Water.WaterFullyGrown or false
 
     for _, plant in ipairs(plants) do
-        local info = Utils.getPlantInfo(plant)
-        if info then
-            -- Check if plant needs water (Growth < 1 and not fully grown)
-            local needsWater = info.Growth < 1
+        if not Water._running then break end
 
-            if needsWater or config.Water.WaterAll then
-                -- Get plant position for watering can
-                local rootPart = plant:FindFirstChildWhichIsA("BasePart")
-                if rootPart then
-                    -- METHOD 1: Use watering can remote
-                    local ok = Net.fire("WateringCan.UseWateringCan", rootPart.Position)
-                    if ok then
-                        Water._stats.watered += 1
-                    else
-                        Water._stats.errors += 1
-                    end
-                end
-            end
+        local info = Utils.getPlantInfo(plant)
+        if not info then continue end
+
+        -- Skip fully grown unless toggle enabled
+        local growth = info.Growth or 0
+        local isFullyGrown = growth >= 1
+        if isFullyGrown and not waterFullyGrown then
+            continue
         end
+
+        -- Water all mode OR needs water (growth < 1)
+        local needsWater = growth < 1
+        if not needsWater and not waterFullyGrown and not config.Water.WaterAll then
+            continue
+        end
+
+        -- 3. Get plant position
+        local rootPart = plant:FindFirstChildWhichIsA("BasePart")
+        if not rootPart then continue end
+
+        -- 4. Fire UseWateringCan(position, canName, toolInstance)
+        -- Position offset -0.3 Y like decompiled TryWater
+        local pos = rootPart.Position - Vector3.new(0, 0.3, 0)
+        local ok = pcall(function()
+            Net.fire("WateringCan.UseWateringCan", pos, canName, canTool)
+        end)
+
+        if ok then
+            Water._stats.watered += 1
+        else
+            Water._stats.errors += 1
+        end
+
+        task.wait(0.5) -- cooldown between plants (match TryWater 0.5s cooldown)
     end
 end
 
 ---------------------------------------------------------------
--- AUTO SPRINKLER (place sprinklers in garden)
+-- PLACE SPRINKLER (utility)
 ---------------------------------------------------------------
 
 function Water.placeSprinkler(Net, Utils, sprinklerType)
     local garden = Utils.getMyGarden()
     if not garden then return false end
 
-    -- Find center of garden
     local spawnPoint = garden:FindFirstChild("SpawnPoint")
     local position = spawnPoint and spawnPoint.Position or Vector3.new(0, 0, 0)
 
@@ -3601,6 +3688,9 @@ local function createUI()
     FarmTab:CreateSlider({Name="Sell", Range={1,30}, Increment=1, Suffix="s", CurrentValue=Config.Timings.SellInterval, Flag="SellInterval", Callback=function(v) Config.Timings.SellInterval=v end})
     FarmTab:CreateSlider({Name="Water", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.WaterInterval, Flag="WaterInterval", Callback=function(v) Config.Timings.WaterInterval=v end})
     FarmTab:CreateSlider({Name="Plant", Range={1,15}, Increment=1, Suffix="s", CurrentValue=Config.Timings.PlantInterval, Flag="PlantInterval", Callback=function(v) Config.Timings.PlantInterval=v end})
+
+    FarmTab:CreateSection("💧 Water Config")
+    FarmTab:CreateToggle({Name="Water Fully Grown", CurrentValue=false, Flag="WaterFullyGrown", Callback=function(v) Config.Water.WaterFullyGrown=v end})
 
     FarmTab:CreateSection("🌱 Plant Config")
     FarmTab:CreateSlider({Name="Grid Spacing", Range={2,8}, Increment=0.5, Suffix=" studs", CurrentValue=Config.Plant.GridSpacing, Flag="GridSpacing", Callback=function(v) Config.Plant.GridSpacing=v end})
