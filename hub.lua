@@ -1376,6 +1376,8 @@ end
 
 function Plant._isMutatedSeed(seedToolValue)
     if not seedToolValue then return false end
+    -- Match "Gold", "Gold Carrot", "Rainbow", "Rainbow Tomato", etc.
+    if seedToolValue == "Gold" or seedToolValue == "Rainbow" then return true end
     return string.match(seedToolValue, "^Gold ") ~= nil
         or string.match(seedToolValue, "^Rainbow ") ~= nil
 end
