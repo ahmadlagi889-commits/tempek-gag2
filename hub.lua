@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "b00e518"
+local VERSION = "b00e519"
 
 local Config = {
     Features = {
@@ -2385,21 +2385,7 @@ do
     ---------------------------------------------------------------
 
     function Steal._isGardenUnlocked(garden)
-        -- Check 1: garden attribute "Locked"
-        local locked = garden:GetAttribute("Locked")
-        if locked == true then return false end
-
-        -- Check 2: BoolValue "Locked" inside garden
-        local lockVal = garden:FindFirstChild("Locked")
-        if lockVal and lockVal:IsA("BoolValue") and lockVal.Value == true then
-            return false
-        end
-
-        -- Check 3: attribute "GardenLocked"
-        local gl = garden:GetAttribute("GardenLocked")
-        if gl == true then return false end
-
-        -- Check 4: owner player proximity (if owner near plot → locked)
+        -- Check: owner player inside plot → locked
         local ownerUserId = garden:GetAttribute("OwnerUserId")
             or garden:GetAttribute("Owner")
         if ownerUserId then
@@ -2409,18 +2395,25 @@ do
                 local owner = Players:GetPlayerByUserId(ownerUserId)
                 if owner and owner.Character then
                     local ownerHRP = owner.Character:FindFirstChild("HumanoidRootPart")
-                    local refPart = garden:FindFirstChild("SpawnPoint")
-                        or garden:FindFirstChildWhichIsA("BasePart")
-                    if ownerHRP and refPart then
-                        local dist = (ownerHRP.Position - refPart.Position).Magnitude
-                        -- Owner within ~50 studs of their plot = likely present → locked
-                        if dist < 50 then return false end
+                    if ownerHRP then
+                        -- Check if owner position is inside any PlantArea part
+                        for _, part in ipairs(garden:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                local relPos = part.CFrame:PointToObjectSpace(ownerHRP.Position)
+                                local halfSize = part.Size / 2
+                                if math.abs(relPos.X) <= halfSize.X
+                                    and math.abs(relPos.Y) <= halfSize.Y + 10
+                                    and math.abs(relPos.Z) <= halfSize.Z then
+                                    return false -- owner inside plot boundary → locked
+                                end
+                            end
+                        end
                     end
                 end
             end
         end
 
-        return true -- no lock detected → unlocked → stealable
+        return true -- owner not found or not in plot → unlocked → stealable
     end
 
     ---------------------------------------------------------------
