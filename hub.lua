@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "1.1.0"
+local VERSION = "1.1.1"
 
 local Config = {
     Features = {
@@ -1173,7 +1173,7 @@ function Water._findCan(requiredCan)
 
     local reqNorm = trim(requiredCan)
     if Water._debug then
-        warn("[Water][DEBUG] RequiredCan raw:", string.format("%q", requiredCan or ""),
+        warn("[Water][DEBUG] RequiredCan raw:", string.format("%q", tostring(requiredCan or "")),
              "| norm:", string.format("%q", reqNorm),
              "| type:", type(requiredCan),
              "| len:", #reqNorm)
@@ -1228,7 +1228,7 @@ function Water._findCan(requiredCan)
     tool, canName = scanContainer(backpack, "Backpack")
 
     if not tool and Water._debug then
-        warn("[Water][DEBUG] No watering can found! RequiredCan:", string.format("%q", requiredCan or ""))
+        warn("[Water][DEBUG] No watering can found! RequiredCan:", string.format("%q", tostring(requiredCan or "")))
     end
 
     return tool, canName
