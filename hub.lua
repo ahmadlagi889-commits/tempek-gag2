@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "1.0.7"
+local VERSION = "1.0.8"
 
 local Config = {
     Features = {
@@ -1150,6 +1150,7 @@ Water._running = false
 Water._thread  = nil
 Water._connections = {}
 Water._stats = { watered = 0, scans = 0, errors = 0, noCan = 0 }
+Water._debug = true -- set false to silence debug
 
 ---------------------------------------------------------------
 -- FIND WATERING CAN TOOL IN BACKPACK/CHARACTER
@@ -1159,7 +1160,10 @@ Water._stats = { watered = 0, scans = 0, errors = 0, noCan = 0 }
 
 function Water._findCan(requiredCan)
     local LP = Players.LocalPlayer
-    if not LP then return nil, nil end
+    if not LP then
+        if Water._debug then warn("[Water][DEBUG] No LocalPlayer") end
+        return nil, nil
+    end
 
     -- If no specific can required, use first found
     local matchFn = function(canName)
@@ -1169,13 +1173,26 @@ function Water._findCan(requiredCan)
         return canName == requiredCan
     end
 
-    local function scanContainer(container)
+    local function scanContainer(container, label)
         if not container then return nil end
-        for _, tool in ipairs(container:GetChildren()) do
+        local tools = container:GetChildren()
+        if Water._debug then
+            warn("[Water][DEBUG] Scanning", label, "- items:", #tools)
+        end
+        for _, tool in ipairs(tools) do
             if tool:IsA("Tool") then
+                local wcAttr = tool:GetAttribute("WateringCan")
+                if Water._debug then
+                    warn("[Water][DEBUG] Tool:", tool.Name,
+                         "| WateringCan attr:", tostring(wcAttr),
+                         "| Class:", tool.ClassName)
+                end
                 -- WateringCan attribute = flag for watering can tools
-                if tool:GetAttribute("WateringCan") ~= nil then
+                if wcAttr ~= nil then
                     local canName = tool.Name -- "Common Watering Can", "Super Watering Can"
+                    if Water._debug then
+                        warn("[Water][DEBUG] Found can:", canName, "match:", matchFn(canName))
+                    end
                     if matchFn(canName) then
                         return tool, canName
                     end
@@ -1187,12 +1204,17 @@ function Water._findCan(requiredCan)
 
     -- Check character first (already equipped)
     local char = LP.Character
-    local tool, canName = scanContainer(char)
+    local tool, canName = scanContainer(char, "Character")
     if tool then return tool, canName end
 
     -- Check backpack
     local backpack = LP:FindFirstChild("Backpack")
-    tool, canName = scanContainer(backpack)
+    tool, canName = scanContainer(backpack, "Backpack")
+
+    if not tool and Water._debug then
+        warn("[Water][DEBUG] No watering can found! RequiredCan:", tostring(requiredCan))
+    end
+
     return tool, canName
 end
 
@@ -1204,14 +1226,23 @@ function Water._equipCan(tool)
     local LP = Players.LocalPlayer
     local char = LP and LP.Character
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
+    if not humanoid then
+        if Water._debug then warn("[Water][DEBUG] No humanoid for equip") end
+        return false
+    end
 
     -- Already in character?
-    if tool.Parent == char then return true end
+    if tool.Parent == char then
+        if Water._debug then warn("[Water][DEBUG] Can already equipped:", tool.Name) end
+        return true
+    end
 
+    if Water._debug then warn("[Water][DEBUG] Equipping:", tool.Name, "from:", tool.Parent and tool.Parent.Name) end
     pcall(function() humanoid:EquipTool(tool) end)
     task.wait(0.2)
-    return tool.Parent == char
+    local success = tool.Parent == char
+    if Water._debug then warn("[Water][DEBUG] Equip result:", success, "parent:", tool.Parent and tool.Parent.Name) end
+    return success
 end
 
 ---------------------------------------------------------------
@@ -1242,7 +1273,10 @@ end
 
 function Water._waterPlants(config, Net, Utils)
     local garden = Utils.getMyGarden()
-    if not garden then return end
+    if not garden then
+        if Water._debug then warn("[Water][DEBUG] No garden found") end
+        return
+    end
 
     Water._stats.scans += 1
 
@@ -1250,56 +1284,86 @@ function Water._waterPlants(config, Net, Utils)
     local canTool, canName = Water._findCan(config.Water.RequiredCan)
     if not canTool then
         Water._stats.noCan += 1
+        if Water._debug then warn("[Water][DEBUG] noCan, scan:", Water._stats.scans) end
         return
     end
 
     local equipped = Water._equipCan(canTool)
     if not equipped then
         Water._stats.errors += 1
+        if Water._debug then warn("[Water][DEBUG] Failed to equip can") end
         return
     end
 
     -- 2. Scan plants
     local plants = Utils.getPlantsInGarden(garden)
     local waterFullyGrown = config.Water.WaterFullyGrown or false
+    if Water._debug then
+        warn("[Water][DEBUG] Garden:", garden.Name, "| Plants:", #plants,
+             "| WaterAll:", tostring(config.Water.WaterAll),
+             "| WaterFullyGrown:", tostring(waterFullyGrown),
+             "| RequiredCan:", tostring(config.Water.RequiredCan))
+    end
 
+    local wateredThisRound = 0
     for _, plant in ipairs(plants) do
         if not Water._running then break end
 
         local info = Utils.getPlantInfo(plant)
-        if not info then continue end
+        if not info then
+            if Water._debug then warn("[Water][DEBUG] No info for plant:", plant.Name) end
+            continue
+        end
 
         -- Skip fully grown unless toggle enabled
         local growth = info.Growth or 0
         local isFullyGrown = growth >= 1
         if isFullyGrown and not waterFullyGrown then
+            if Water._debug then warn("[Water][DEBUG] Skip fully grown:", info.Name, "growth:", growth) end
             continue
         end
 
         -- Water all mode OR needs water (growth < 1)
         local needsWater = growth < 1
         if not needsWater and not waterFullyGrown and not config.Water.WaterAll then
+            if Water._debug then warn("[Water][DEBUG] Skip no-water-need:", info.Name, "growth:", growth) end
             continue
         end
 
         -- 3. Get plant position
         local rootPart = plant:FindFirstChildWhichIsA("BasePart")
-        if not rootPart then continue end
+        if not rootPart then
+            if Water._debug then warn("[Water][DEBUG] No BasePart for plant:", info.Name) end
+            continue
+        end
 
         -- 4. Fire UseWateringCan(position, canName, toolInstance)
         -- Position offset -0.3 Y like decompiled TryWater
         local pos = rootPart.Position - Vector3.new(0, 0.3, 0)
+        if Water._debug then
+            warn("[Water][DEBUG] Watering:", info.Name,
+                 "| pos:", tostring(pos),
+                 "| can:", canName)
+        end
         local ok = pcall(function()
             Net.fire("WateringCan.UseWateringCan", pos, canName, canTool)
         end)
 
         if ok then
             Water._stats.watered += 1
+            wateredThisRound += 1
         else
             Water._stats.errors += 1
+            if Water._debug then warn("[Water][DEBUG] Fire failed for:", info.Name) end
         end
 
         task.wait(0.5) -- cooldown between plants (match TryWater 0.5s cooldown)
+    end
+
+    if Water._debug and wateredThisRound > 0 then
+        warn("[Water][DEBUG] Round done. Watered:", wateredThisRound,
+             "| Total:", Water._stats.watered,
+             "| Errors:", Water._stats.errors)
     end
 end
 
