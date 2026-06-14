@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "1.0.4"
+local VERSION = "1.0.5"
 
 local Config = {
     Features = {
@@ -3355,11 +3355,11 @@ do
 
         for _, spawn in ipairs(spawns) do
             if not SeedPack._running then break end
-            SeedPack._claimOne(spawn, Net)
+            SeedPack._claimOne(spawn, Net, root)
         end
     end
 
-    function SeedPack._claimOne(spawn, Net)
+    function SeedPack._claimOne(spawn, Net, root)
         local part = spawn.part
         if not part or not part.Parent then return end
         if SeedPack._claimed[part] then return end
@@ -3367,15 +3367,15 @@ do
         local packId = part:GetAttribute("SeedPack") or ""
         local claimed = false
 
-        -- Method 1: Fire ProximityPrompt (search recursively in case nested)
+        -- Save original position, teleport near part for server distance check
+        local origCFrame = root.CFrame
+        pcall(function()
+            root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
+        end)
+        task.wait(0.3)
+
+        -- Method 1: Fire ProximityPrompt (search recursively)
         local prompt = part:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if not prompt then
-            -- Debug: log children structure
-            print("[GAG Hub] SeedPack DEBUG no ProximityPrompt in:", part.Name)
-            for _, child in ipairs(part:GetDescendants()) do
-                print("  -", child.Name, child.ClassName)
-            end
-        end
         if prompt then
             local pOk = pcall(function()
                 prompt.MaxActivationDistance = 999
@@ -3437,6 +3437,12 @@ do
             end
             SeedPack._claimed[part] = nil
         end)
+
+        -- Return to original position
+        task.wait(0.1)
+        pcall(function()
+            root.CFrame = origCFrame
+        end)
     end
 
     ---------------------------------------------------------------
@@ -3459,6 +3465,9 @@ do
             local isRainbow = part:GetAttribute("RainbowSeed") == true
             local isGold = part:GetAttribute("GoldSeed") == true
 
+            local LP = Utils.getLocalPlayer()
+            local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            if not root then return end
             SeedPack._claimOne({
                 part = part,
                 rainbow = isRainbow,
