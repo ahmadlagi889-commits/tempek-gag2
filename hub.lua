@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "1.0.7"
+local VERSION = "1.0.6"
 
 local Config = {
     Features = {
@@ -1173,12 +1173,9 @@ function Water._findCan(requiredCan)
         if not container then return nil end
         for _, tool in ipairs(container:GetChildren()) do
             if tool:IsA("Tool") then
-                local itemType = tool:GetAttribute("ItemType") or ""
-                if itemType == "WateringCan" then
-                    local canName = tool.Name -- "Common Watering Can", "Super Watering Can"
-                    if matchFn(canName) then
-                        return tool, canName
-                    end
+                local canName = tool:GetAttribute("WateringCan")
+                if canName and matchFn(canName) then
+                    return tool, canName
                 end
             end
         end
