@@ -1,0 +1,20 @@
+# Credentials
+*.token
+.env
+.git-credentials
+
+# Push scripts (local only)
+push.bat
+push.sh
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
