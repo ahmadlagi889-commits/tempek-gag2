@@ -3355,53 +3355,33 @@ do
 
         for _, spawn in ipairs(spawns) do
             if not SeedPack._running then break end
-            SeedPack._claimOne(spawn, Net, root)
+            SeedPack._claimOne(spawn, Net)
         end
     end
 
-    function SeedPack._claimOne(spawn, Net, root)
+    function SeedPack._claimOne(spawn, Net)
         local part = spawn.part
         if not part or not part.Parent then return end
         if SeedPack._claimed[part] then return end
 
-        -- Save original position
-        local origCFrame = root.CFrame
         local packId = part:GetAttribute("SeedPack") or ""
-
-        -- Teleport to seed pack
-        pcall(function()
-            root.CFrame = part.CFrame * CFrame.new(0, 3, 0)
-        end)
-        task.wait(0.4)
-
         local claimed = false
 
-        -- Method 1: Find nearest ProximityPrompt after teleport
-        local nearestPrompt = nil
-        local nearestDist = math.huge
-        for _, desc in ipairs(workspace:GetDescendants()) do
-            if desc:IsA("ProximityPrompt") and desc.Enabled then
-                local promptParent = desc.Parent
-                if promptParent and promptParent:IsA("BasePart") then
-                    local dist = (promptParent.Position - root.Position).Magnitude
-                    if dist < nearestDist and dist <= desc.MaxActivationDistance then
-                        nearestDist = dist
-                        nearestPrompt = desc
-                    end
-                end
-            end
-        end
-
-        if nearestPrompt then
+        -- Method 1: Fire ProximityPrompt child directly (no teleport needed)
+        -- Path: workspace.Map.SeedPackSpawnServerLocations.<Part>.ProximityPrompt
+        -- MaxActivationDistance=10, fireable from any distance via exploit
+        local prompt = part:FindFirstChild("ProximityPrompt")
+        if prompt and prompt:IsA("ProximityPrompt") then
             local pOk = pcall(function()
-                nearestPrompt.HoldDuration = 0
-                nearestPrompt:InputHoldBegin()
+                prompt.MaxActivationDistance = 999
+                prompt.HoldDuration = 0
+                prompt:InputHoldBegin()
                 task.wait(0.1)
-                nearestPrompt:InputHoldEnd()
+                prompt:InputHoldEnd()
                 claimed = true
             end)
             if claimed then
-                print("[GAG Hub] ProximityPrompt fired for:", spawn.pack or part.Name, "dist:", math.floor(nearestDist))
+                print("[GAG Hub] SeedPack ProximityPrompt fired:", spawn.pack or part.Name)
             end
         end
 
@@ -3415,8 +3395,8 @@ do
 
         -- Method 3: OpenSeedPack invoke (fallback)
         if not claimed then
-            local ok2, result = pcall(function()
-                return Net.invoke("SeedPack.OpenSeedPack", packId)
+            local ok2 = pcall(function()
+                Net.invoke("SeedPack.OpenSeedPack", packId)
             end)
             if ok2 then claimed = true end
         end
@@ -3452,12 +3432,6 @@ do
             end
             SeedPack._claimed[part] = nil
         end)
-
-        -- Return to original position
-        task.wait(0.2)
-        pcall(function()
-            root.CFrame = origCFrame
-        end)
     end
 
     ---------------------------------------------------------------
@@ -3480,17 +3454,13 @@ do
             local isRainbow = part:GetAttribute("RainbowSeed") == true
             local isGold = part:GetAttribute("GoldSeed") == true
 
-            local LP = Utils.getLocalPlayer()
-            local root = LP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-            if root then
-                SeedPack._claimOne({
-                    part = part,
-                    rainbow = isRainbow,
-                    gold = isGold,
-                    pack = part:GetAttribute("SeedPack") or "",
-                    priority = isRainbow and 3 or (isGold and 2 or 1),
-                }, Net, root)
-            end
+            SeedPack._claimOne({
+                part = part,
+                rainbow = isRainbow,
+                gold = isGold,
+                pack = part:GetAttribute("SeedPack") or "",
+                priority = isRainbow and 3 or (isGold and 2 or 1),
+            }, Net)
         end)
         table.insert(SeedPack._connections, conn)
     end
