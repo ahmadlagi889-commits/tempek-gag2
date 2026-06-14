@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "1.0.9"
+local VERSION = "1.1.0"
 
 local Config = {
     Features = {
@@ -1167,10 +1167,11 @@ function Water._findCan(requiredCan)
 
     -- Normalize: trim whitespace
     local function trim(s)
-        return s:match("^%s*(.-)%s*$")
+        if type(s) ~= "string" then return "" end
+        return s:match("^%s*(.-)%s*$") or ""
     end
 
-    local reqNorm = trim(requiredCan or "")
+    local reqNorm = trim(requiredCan)
     if Water._debug then
         warn("[Water][DEBUG] RequiredCan raw:", string.format("%q", requiredCan or ""),
              "| norm:", string.format("%q", reqNorm),
