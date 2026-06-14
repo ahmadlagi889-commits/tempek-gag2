@@ -3378,7 +3378,6 @@ do
         local prompt = part:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt then
             local pOk = pcall(function()
-                prompt.MaxActivationDistance = 999
                 prompt.HoldDuration = 0
                 prompt:InputHoldBegin()
                 task.wait(0.1)
