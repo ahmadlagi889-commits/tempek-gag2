@@ -12,7 +12,7 @@ end
 -- CONFIG
 ---------------------------------------------------------------
 
-local VERSION = "1.0.8"
+local VERSION = "1.0.9"
 
 local Config = {
     Features = {
@@ -1165,12 +1165,23 @@ function Water._findCan(requiredCan)
         return nil, nil
     end
 
+    -- Normalize: trim whitespace
+    local function trim(s)
+        return s:match("^%s*(.-)%s*$")
+    end
+
+    local reqNorm = trim(requiredCan or "")
+    if Water._debug then
+        warn("[Water][DEBUG] RequiredCan raw:", string.format("%q", requiredCan or ""),
+             "| norm:", string.format("%q", reqNorm),
+             "| type:", type(requiredCan),
+             "| len:", #reqNorm)
+    end
+
     -- If no specific can required, use first found
     local matchFn = function(canName)
-        if not requiredCan or requiredCan == "" then
-            return true
-        end
-        return canName == requiredCan
+        if reqNorm == "" then return true end
+        return trim(canName) == reqNorm
     end
 
     local function scanContainer(container, label)
@@ -1184,16 +1195,20 @@ function Water._findCan(requiredCan)
                 local wcAttr = tool:GetAttribute("WateringCan")
                 if Water._debug then
                     warn("[Water][DEBUG] Tool:", tool.Name,
-                         "| WateringCan attr:", tostring(wcAttr),
+                         "| WateringCan attr:", string.format("%q", tostring(wcAttr)),
+                         "| attr type:", type(wcAttr),
                          "| Class:", tool.ClassName)
                 end
                 -- WateringCan attribute = flag for watering can tools
                 if wcAttr ~= nil then
-                    local canName = tool.Name -- "Common Watering Can", "Super Watering Can"
+                    local canName = tool.Name
+                    local matched = matchFn(canName)
                     if Water._debug then
-                        warn("[Water][DEBUG] Found can:", canName, "match:", matchFn(canName))
+                        warn("[Water][DEBUG] Found can:", string.format("%q", canName),
+                             "| match:", matched,
+                             "| compare:", string.format("%q", trim(canName)), "==", string.format("%q", reqNorm))
                     end
-                    if matchFn(canName) then
+                    if matched then
                         return tool, canName
                     end
                 end
@@ -1212,7 +1227,7 @@ function Water._findCan(requiredCan)
     tool, canName = scanContainer(backpack, "Backpack")
 
     if not tool and Water._debug then
-        warn("[Water][DEBUG] No watering can found! RequiredCan:", tostring(requiredCan))
+        warn("[Water][DEBUG] No watering can found! RequiredCan:", string.format("%q", requiredCan or ""))
     end
 
     return tool, canName
