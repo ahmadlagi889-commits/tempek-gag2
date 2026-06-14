@@ -3367,11 +3367,16 @@ do
         local packId = part:GetAttribute("SeedPack") or ""
         local claimed = false
 
-        -- Method 1: Fire ProximityPrompt child directly (no teleport needed)
-        -- Path: workspace.Map.SeedPackSpawnServerLocations.<Part>.ProximityPrompt
-        -- MaxActivationDistance=10, fireable from any distance via exploit
-        local prompt = part:FindFirstChild("ProximityPrompt")
-        if prompt and prompt:IsA("ProximityPrompt") then
+        -- Method 1: Fire ProximityPrompt (search recursively in case nested)
+        local prompt = part:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if not prompt then
+            -- Debug: log children structure
+            print("[GAG Hub] SeedPack DEBUG no ProximityPrompt in:", part.Name)
+            for _, child in ipairs(part:GetDescendants()) do
+                print("  -", child.Name, child.ClassName)
+            end
+        end
+        if prompt then
             local pOk = pcall(function()
                 prompt.MaxActivationDistance = 999
                 prompt.HoldDuration = 0
