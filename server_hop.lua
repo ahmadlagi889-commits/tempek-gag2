@@ -189,8 +189,8 @@ end)
 -- TELEPORT FAIL HANDLER
 ---------------------------------------------------------------
 
-TeleportService.TeleportFailed:Connect(function(_, _, msg)
-    warn("[ServerHop] TeleportFailed:", msg)
+TeleportService.TeleportInitFailed:Connect(function(_, teleportResult, msg)
+    warn("[ServerHop] TeleportInitFailed:", teleportResult, msg)
     State.LastStatus = "Teleport failed: " .. tostring(msg)
     task.wait(3)
     if State.AutoHop then
