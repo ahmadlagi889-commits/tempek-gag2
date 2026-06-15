@@ -3686,11 +3686,11 @@ do
         local rejoinDelay = serverConfig.RejoinDelay or 5
 
         -- On teleport failure (kicked/disconnected), rejoin target server
-        TS.TeleportFailed:Connect(function(player, teleportResult, errorMessage)
+        TS.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
             if not M._running then return end
             if targetJobId == "" then return end
 
-            warn("[GAG Hub] TeleportFailed:", errorMessage, "— rejoining in", rejoinDelay, "s")
+            warn("[GAG Hub] TeleportInitFailed:", teleportResult, errorMessage, "— rejoining in", rejoinDelay, "s")
             task.wait(rejoinDelay)
 
             local LP = Utils.getLocalPlayer()
